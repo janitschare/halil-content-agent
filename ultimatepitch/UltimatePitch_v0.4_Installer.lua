@@ -113,7 +113,8 @@ for _, s in ipairs({ -1, 1 }) do
 end
 
 -- Banden (Glas, Lücke für Tore)
-local glass = { Material = Enum.Material.Glass, Transparency = 0.85, Color = Color3.fromRGB(200, 230, 255) }
+-- SmoothPlastic statt Glass: Glass blendet dahinterliegende SurfaceGuis (LED-Banden) aus
+local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.85, Color = Color3.fromRGB(200, 230, 255) }
 local function wall(size, pos)
 	local p = part({ Name = "Wall", Size = size, Position = pos }, walls)
 	for k, val in pairs(glass) do p[k] = val end
@@ -154,7 +155,7 @@ new("SpawnLocation", {
 	TopSurface = Enum.SurfaceType.Smooth,
 }, lobby)
 local sign = part({ Name = "Sign", Size = Vector3.new(30, 7, 1), Position = LC + Vector3.new(0, 6, -21.5), Color = Color3.fromRGB(20, 22, 28) }, lobby)
-local sg = new("SurfaceGui", { Face = Enum.NormalId.Back, PixelsPerStud = 40 }, sign)
+local sg = new("SurfaceGui", { Face = Enum.NormalId.Back, SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud, PixelsPerStud = 40 }, sign)
 new("TextLabel", {
 	Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "ULTIMATEPITCH v" .. VERSION,
 	Font = Enum.Font.GothamBlack, TextScaled = true, TextColor3 = Color3.fromRGB(255, 200, 40),
@@ -208,6 +209,56 @@ new("Sound", { Name = "Whistle", SoundId = "rbxasset://sounds/electronicpingshor
 new("Sound", { Name = "Goal", SoundId = "rbxasset://sounds/victory.wav", Volume = 1 }, sounds)
 new("Sound", { Name = "Save", SoundId = "rbxasset://sounds/button.wav", Volume = 1 }, sounds)
 
+-- Punkte und Eckfahnen
+local function spot(x)
+	part({ Name = "Spot", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.05, 1.2, 1.2), CFrame = CFrame.new(x, GY + 0.05, 0) * CFrame.Angles(0, 0, math.pi / 2),
+		Color = WHITE, Material = Enum.Material.SmoothPlastic, CanCollide = false, CanQuery = false, CanTouch = false }, field)
+end
+spot(0); spot(68); spot(-68)
+for _, sx in ipairs({ -1, 1 }) do
+	for _, sz in ipairs({ -1, 1 }) do
+		local base = Vector3.new(sx * 79.6, GY, sz * 49.6)
+		part({ Name = "FlagPole", Size = Vector3.new(0.25, 5, 0.25), Position = base + Vector3.new(0, 2.5, 0),
+			Color = WHITE, Material = Enum.Material.Metal, CanCollide = false }, field)
+		part({ Name = "Flag", Size = Vector3.new(0.05, 1.2, 1.6), Position = base + Vector3.new(0, 4.4, -sz * 0.8),
+			Color = Color3.fromRGB(255, 200, 40), Material = Enum.Material.Fabric, CanCollide = false, CanQuery = false, CanTouch = false }, field)
+	end
+end
+
+-- LED-Banden hinter den Seitenlinien
+local ADS = { "ULTIMATEPITCH", "5 v 5", "GOLDEN GOAL", "ULTIMATEPITCH", "FAIR PLAY" }
+for _, side in ipairs({ -1, 1 }) do
+	for i, text in ipairs(ADS) do
+		local x = -64 + (i - 1) * 32
+		local board = part({ Name = "AdBoard", Size = Vector3.new(30, 2.6, 0.6), Position = Vector3.new(x, GY + 1.3, side * 54),
+			Color = Color3.fromRGB(14, 16, 22), Material = Enum.Material.SmoothPlastic }, stands)
+		local gui = new("SurfaceGui", { Face = side > 0 and Enum.NormalId.Front or Enum.NormalId.Back,
+			SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud, PixelsPerStud = 30,
+			LightInfluence = 0, Brightness = 1.6 }, board)
+		new("TextLabel", {
+			Size = UDim2.fromScale(1, 1), BackgroundColor3 = i % 2 == 0 and Color3.fromRGB(20, 60, 160) or Color3.fromRGB(150, 20, 30),
+			Text = text, Font = Enum.Font.GothamBlack, TextScaled = true, TextColor3 = Color3.fromRGB(255, 255, 255),
+		}, gui)
+	end
+end
+
+-- Atmosphaere: Abendspiel unter Flutlicht
+local Lighting = game:GetService("Lighting")
+for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
+	local o = Lighting:FindFirstChild(n)
+	if o then o:Destroy() end
+end
+pcall(function()
+	Lighting.ClockTime = 17.4
+	Lighting.Brightness = 2.2
+	Lighting.OutdoorAmbient = Color3.fromRGB(120, 124, 140)
+	Lighting.EnvironmentDiffuseScale = 0.5
+	Lighting.EnvironmentSpecularScale = 0.5
+end)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.25, Offset = 0.1, Color = Color3.fromRGB(200, 205, 225),
+	Decay = Color3.fromRGB(110, 110, 150), Glare = 0.3, Haze = 1 }, Lighting)
+new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.5, Size = 28, Threshold = 1.7 }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Contrast = 0.08, Saturation = 0.1, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
 
 end
 
