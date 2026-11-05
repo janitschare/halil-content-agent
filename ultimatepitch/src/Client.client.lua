@@ -75,6 +75,10 @@ State.AttributeChanged:Connect(function(name)
 end)
 refresh()
 
+Kick.OnClientEvent:Connect(function(what)
+	if what == "TooFar" then showMsg("Zu weit vom Ball!") end
+end)
+
 local RunService = game:GetService("RunService")
 
 -- Leisten (Ausdauer + Schusskraft)
