@@ -7,4 +7,4 @@ Die Welt baut sich beim Start selbst. Alternative: `UltimatePitch_v0.4_Installer
 
 **Steuerung:** F / Klick halten = Schuss (Kraft) · E = Pass · Shift = Sprint
 
-Code in `src/`, Dateien neu bauen mit `python3 build.py`. Sound-IDs: `ReplicatedStorage.UltimatePitch.Sounds`.
+Code in `src/`, Dateien neu bauen mit `python3 build.py`. Sound-IDs: im Server-Skript, Abschnitt „Sounds“.
