@@ -1,10 +1,10 @@
-# UltimatePitch v0.3
+# UltimatePitch v0.4
 
-5v5-Fußball für Roblox: Bots, Torwart, Lobby, Golden Goal.
+5v5-Fußball für Roblox: Bots, Torwart, Lobby, Golden Goal, Sprint, Schusskraft, Tribünen, Sounds.
 
-**Installieren:** Studio → View → Command Bar → Inhalt von `UltimatePitch_v0.3_Installer.lua` einfügen → Enter → Play.
+**Starten:** `UltimatePitch_v0.4.rbxlx` herunterladen → in Studio *Datei → Öffnen* → **Spielen**.
+Die Welt baut sich beim Start selbst. Alternative: `UltimatePitch_v0.4_Installer.lua` in die Befehlsleiste (Test vorher stoppen).
 
-**Steuerung:** F / Klick = Schuss · E = Pass (Mobil: Buttons)
+**Steuerung:** F / Klick halten = Schuss (Kraft) · E = Pass · Shift = Sprint
 
-**Ablauf:** Lobby → 12 s Countdown → 3 min Spiel → bei Gleichstand Golden Goal → zurück in die Lobby.
-Bis zu 8 Spieler, freie Plätze und Torwarte übernehmen Bots. Einstellungen: `CFG` in `ServerScriptService.UltimatePitchServer`.
+Code in `src/`, Dateien neu bauen mit `python3 build.py`. Sound-IDs: `ReplicatedStorage.UltimatePitch.Sounds`.

@@ -1,42 +1,34 @@
---[[
-	UltimatePitch v0.3 – Roblox Studio Installer
-	5v5 mit Bots · Torwart · Lobby · Golden Goal
-
-	Installation: Studio > View > Command Bar > gesamten Inhalt einfügen > Enter > Play.
-	Erneutes Ausführen ersetzt eine vorhandene Installation.
-]]
-
-local VERSION = "0.3"
-local GY = 1 -- Oberkante Rasen
-
+-- UltimatePitch v0.4 – Command-Bar-Installer (Alternative zur .rbxlx)
+-- Test vorher stoppen! Einfügen, Enter, dann Spielen. Die Welt baut sich beim Start.
 if game:GetService("RunService"):IsRunning() then
-	error("❌ UltimatePitch: Erst Test stoppen (rotes Quadrat), dann Installer erneut ausführen!")
+	error("❌ Erst Test stoppen (rotes Quadrat), dann erneut ausführen!")
 end
-
-local CHS = game:GetService("ChangeHistoryService")
-local RS = game:GetService("ReplicatedStorage")
 local SSS = game:GetService("ServerScriptService")
-local Teams = game:GetService("Teams")
 local SPS = game:GetService("StarterPlayer"):FindFirstChildOfClass("StarterPlayerScripts")
-	or Instance.new("StarterPlayerScripts", game:GetService("StarterPlayer"))
+for _, o in pairs({ SSS:FindFirstChild("UltimatePitchServer"), SPS:FindFirstChild("UltimatePitchClient"),
+	workspace:FindFirstChild("UltimatePitch"), game:GetService("ReplicatedStorage"):FindFirstChild("UltimatePitch") }) do
+	if o then o:Destroy() end
+end
+local s = Instance.new("Script") s.Name = "UltimatePitchServer" s.Source = [==[-- UltimatePitch v0.4 · Server (baut die Welt beim Start selbst)
+local VERSION = "0.4"
+local GY = 1
 
-CHS:SetWaypoint("UltimatePitch: vor Installation")
+local RS = game:GetService("ReplicatedStorage")
+local Teams = game:GetService("Teams")
 
--- Alte Installation entfernen
+-- Alte Reste (v0.3-Installer) entfernen
 for _, pair in ipairs({
-	{ workspace, "UltimatePitch" }, { RS, "UltimatePitch" }, { SSS, "UltimatePitchServer" },
-	{ SPS, "UltimatePitchClient" }, { Teams, "Lobby" }, { Teams, "Rot" }, { Teams, "Blau" },
+	{ workspace, "UltimatePitch" }, { RS, "UltimatePitch" },
+	{ Teams, "Lobby" }, { Teams, "Rot" }, { Teams, "Blau" },
 }) do
 	local obj = pair[1]:FindFirstChild(pair[2])
 	if obj then obj:Destroy() end
 end
-
--- Fremde Spawns deaktivieren (sonst spawnt man auf dem Feld)
 for _, d in ipairs(workspace:GetDescendants()) do
-	if d:IsA("SpawnLocation") then
-		d.Enabled = false
-	end
+	if d:IsA("SpawnLocation") then d.Enabled = false end
 end
+local oldServer = game:GetService("ServerScriptService"):FindFirstChild("UltimatePitchServer")
+if oldServer and oldServer ~= script then oldServer:Destroy() end
 
 local function new(class, props, parent)
 	local o = Instance.new(class)
@@ -56,6 +48,7 @@ local function part(props, parent)
 	return p
 end
 
+do
 ------------------------------------------------------------------ Workspace
 local root = new("Folder", { Name = "UltimatePitch" }, workspace)
 root:SetAttribute("Version", VERSION)
@@ -180,9 +173,45 @@ for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0
 end
 new("RemoteEvent", { Name = "Kick" }, shared)
 
------------------------------------------------------------------- Server
-local SERVER = [==[
--- UltimatePitch v0.3 · Server
+-- Tribünen mit Fans
+local stands = new("Folder", { Name = "Stands" }, root)
+local FAN = { Color3.fromRGB(215, 40, 40), Color3.fromRGB(40, 90, 230), Color3.fromRGB(240, 240, 240),
+	Color3.fromRGB(255, 200, 40), Color3.fromRGB(30, 30, 30) }
+for _, side in ipairs({ -1, 1 }) do
+	for row = 1, 6 do
+		local z = side * (54 + row * 3)
+		local h = row * 2
+		part({ Name = "Step", Size = Vector3.new(170, h, 3), Position = Vector3.new(0, GY + h / 2, z),
+			Material = Enum.Material.Concrete, Color = Color3.fromRGB(90, 95, 105) }, stands)
+		for x = -82, 82, 3.4 do
+			if math.random() < 0.8 then
+				part({ Name = "Fan", Size = Vector3.new(1.4, 2.4, 1), Position = Vector3.new(x + math.random() - 0.5, GY + h + 1.2, z),
+					Color = FAN[math.random(#FAN)], CanCollide = false, CanQuery = false, CanTouch = false }, stands)
+			end
+		end
+	end
+end
+for _, s in ipairs({ -1, 1 }) do -- Flutlichter
+	for _, z in ipairs({ -1, 1 }) do
+		local pole = part({ Name = "Floodlight", Size = Vector3.new(2, 50, 2), Position = Vector3.new(s * 90, GY + 25, z * 75),
+			Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal }, stands)
+		local lamp = part({ Name = "Lamp", Size = Vector3.new(8, 4, 2), Position = pole.Position + Vector3.new(0, 26, 0),
+			Color = Color3.fromRGB(255, 250, 220), Material = Enum.Material.Neon }, stands)
+		new("SpotLight", { Brightness = 3, Range = 60, Angle = 70, Face = Enum.NormalId.Bottom }, lamp)
+	end
+end
+
+-- Sounds (IDs bei Bedarf in Eigenschaften austauschen)
+local sounds = new("Folder", { Name = "Sounds" }, shared)
+new("Sound", { Name = "Kick", SoundId = "rbxasset://sounds/swordlunge.wav", Volume = 0.8, PlaybackSpeed = 0.7 }, ball)
+new("Sound", { Name = "Whistle", SoundId = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, PlaybackSpeed = 1.4 }, sounds)
+new("Sound", { Name = "Goal", SoundId = "rbxasset://sounds/victory.wav", Volume = 1 }, sounds)
+new("Sound", { Name = "Save", SoundId = "rbxasset://sounds/button.wav", Volume = 1 }, sounds)
+
+
+end
+
+-- ===== Spiellogik =====
 local Players = game:GetService("Players")
 local Teams = game:GetService("Teams")
 local RS = game:GetService("ReplicatedStorage")
@@ -196,11 +225,16 @@ local Ball = ROOT:WaitForChild("Ball")
 local BotsFolder = ROOT:WaitForChild("Bots")
 local LobbySpawn = ROOT:WaitForChild("Lobby"):WaitForChild("LobbySpawn")
 local LobbyTeam = Teams:WaitForChild("Lobby")
+local Sounds = SHARED:WaitForChild("Sounds")
+local function sfx(name)
+	local snd = Sounds:FindFirstChild(name)
+	if snd then snd:Play() end
+end
 
 local CFG = {
 	MatchTime = 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
 	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
-	KickRange = 5, ShotPower = 95, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
+	KickRange = 5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
 }
 
@@ -248,6 +282,8 @@ local function resetBall()
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 end
 local function kickBall(vel)
+	local k = Ball:FindFirstChild("Kick")
+	if k then k:Play() end
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 	Ball.AssemblyLinearVelocity = vel
 end
@@ -320,6 +356,7 @@ local function placePlayer(plr, teamName, slot)
 	char:PivotTo(slotCF(TEAM[teamName], slot))
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum.WalkSpeed = CFG.PlayerSpeed end
+	char:SetAttribute("BaseSpeed", CFG.PlayerSpeed)
 	highlight(char, TEAM[teamName])
 end
 
@@ -414,7 +451,7 @@ local function keeper(td, m, bp)
 		if rel.Y > 1.5 then m.hum.Jump = true end
 		if math.random() < chance then
 			kickBall(Vector3.new(s * 75, 30, (math.random() * 2 - 1) * 35))
-			if speed > 40 then msg("Parade! TW " .. td.name) end
+			if speed > 40 then msg("Parade! TW " .. td.name); sfx("Save") end
 		end
 	end
 end
@@ -510,6 +547,7 @@ local function cleanup()
 			char:PivotTo(LobbySpawn.CFrame + Vector3.new(0, 4, 0))
 			local hum = char:FindFirstChildOfClass("Humanoid")
 			if hum then hum.WalkSpeed = 16 end
+			char:SetAttribute("BaseSpeed", 16)
 		end
 	end
 	resetBall()
@@ -527,6 +565,7 @@ local function runMatch()
 	kickoff()
 	setPhase("Playing")
 	msg("Anpfiff! Rot ▶  ◀ Blau")
+	sfx("Whistle")
 	while true do
 		local dt = task.wait(0.1)
 		if humanCount() == 0 then break end
@@ -538,13 +577,16 @@ local function runMatch()
 			if golden then
 				winner = t
 				msg("GOLDEN GOAL! " .. t .. " trifft!")
+				sfx("Goal")
 				break
 			end
 			msg("TOR für " .. t .. "!")
+			sfx("Goal")
 			task.wait(CFG.GoalPause)
 			kickoff()
 			pendingGoal = nil
 			setPhase("Playing")
+			sfx("Whistle")
 		elseif not golden then
 			timeLeft -= dt
 			State:SetAttribute("TimeLeft", math.max(0, math.ceil(timeLeft)))
@@ -564,6 +606,7 @@ local function runMatch()
 		end
 	end
 	setPhase("End")
+	sfx("Whistle")
 	task.wait(golden and winner and 2 or 0)
 	msg(winner and ("Team " .. winner .. " gewinnt " .. scores.Rot .. ":" .. scores.Blau .. "!") or "Spiel abgebrochen")
 	task.wait(CFG.EndPause)
@@ -571,7 +614,7 @@ local function runMatch()
 end
 
 ---------------------------------------------------------------- Events
-KickEvent.OnServerEvent:Connect(function(plr, kind)
+KickEvent.OnServerEvent:Connect(function(plr, kind, power)
 	if not inMatch() or pendingGoal then return end
 	local teamName = plr.Team and plr.Team.Name
 	local td = TEAM[teamName]
@@ -588,19 +631,25 @@ KickEvent.OnServerEvent:Connect(function(plr, kind)
 	if kind == "Pass" then
 		kickBall(look * CFG.PassPower + Vector3.new(0, 3, 0))
 	else
-		kickBall(look * CFG.ShotPower + Vector3.new(0, 22, 0))
+		local pw = math.clamp(tonumber(power) or 0.6, 0, 1)
+		kickBall(look * (CFG.ShotMin + (CFG.ShotMax - CFG.ShotMin) * pw) + Vector3.new(0, 6 + 30 * pw, 0))
 	end
 end)
 
 local function onCharacter(plr)
 	task.wait(0.2)
-	if phase == "Lobby" or phase == "Intermission" or phase == "End" then return end
 	local teamName, slot = findPlayerSlot(plr)
-	if teamName then placePlayer(plr, teamName, slot) end
+	if teamName and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
+		placePlayer(plr, teamName, slot)
+	elseif plr.Character then
+		plr.Character:PivotTo(LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		plr.Character:SetAttribute("BaseSpeed", 16)
+	end
 end
 
 local function onPlayer(plr)
 	plr.CharacterAdded:Connect(function() onCharacter(plr) end)
+	if plr.Character then task.spawn(onCharacter, plr) end
 end
 Players.PlayerAdded:Connect(onPlayer)
 for _, p in ipairs(Players:GetPlayers()) do onPlayer(p) end
@@ -662,11 +711,8 @@ while true do
 		end
 	end
 end
-]==]
-
------------------------------------------------------------------- Client
-local CLIENT = [==[
--- UltimatePitch v0.3 · Client (HUD + Steuerung)
+]==] s.Parent = SSS
+local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[-- UltimatePitch v0.4 · Client (HUD, Sprint, Schusskraft)
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local CAS = game:GetService("ContextActionService")
@@ -708,9 +754,9 @@ local info = label({ Parent = bar, Size = UDim2.new(1, 0, 0, 20), Position = UDi
 local big = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.32), Size = UDim2.fromOffset(700, 70),
 	TextSize = 44, Font = Enum.Font.GothamBlack, TextStrokeTransparency = 0.3, TextTransparency = 1 })
 big.TextStrokeTransparency = 1
-label({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12), Size = UDim2.fromOffset(320, 20),
+label({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12), Size = UDim2.fromOffset(420, 20),
 	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.25,
-	Text = "F / Klick = Schuss   ·   E = Pass" })
+	Text = "F / Klick halten = Schuss   ·   E = Pass   ·   Shift = Sprint" })
 
 local function fmt(t) return string.format("%d:%02d", t // 60, t % 60) end
 
@@ -743,21 +789,82 @@ State.AttributeChanged:Connect(function(name)
 end)
 refresh()
 
-local function bind(name, title, kind, ...)
-	CAS:BindAction(name, function(_, st)
-		if st == Enum.UserInputState.Begin then Kick:FireServer(kind) end
-		return Enum.ContextActionResult.Pass
-	end, true, ...)
-	CAS:SetTitle(name, title)
+local RunService = game:GetService("RunService")
+
+-- Leisten (Ausdauer + Schusskraft)
+local function meter(y, color)
+	local back = Instance.new("Frame")
+	back.AnchorPoint = Vector2.new(0.5, 1)
+	back.Position = UDim2.new(0.5, 0, 1, y)
+	back.Size = UDim2.fromOffset(220, 10)
+	back.BackgroundColor3 = Color3.fromRGB(15, 18, 24)
+	back.BackgroundTransparency = 0.3
+	back.Parent = gui
+	Instance.new("UICorner", back).CornerRadius = UDim.new(1, 0)
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = color
+	fill.Parent = back
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+	return back, fill
 end
-bind("UP_Shot", "Schuss", "Shot", Enum.KeyCode.F, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
-bind("UP_Pass", "Pass", "Pass", Enum.KeyCode.E, Enum.KeyCode.ButtonX)
+local _, staminaFill = meter(-40, Color3.fromRGB(80, 220, 120))
+local chargeBack, chargeFill = meter(-56, Color3.fromRGB(255, 170, 40))
+chargeBack.Visible = false
+
+local stamina, sprinting = 1, false
+local charging, chargeStart = false, 0
+local CHARGE_TIME = 1
+
+local function chargeLevel()
+	return math.clamp((os.clock() - chargeStart) / CHARGE_TIME, 0, 1)
+end
+
+RunService.RenderStepped:Connect(function(dt)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		local base = char:GetAttribute("BaseSpeed") or 16
+		local moving = hum.MoveDirection.Magnitude > 0.1
+		local active = sprinting and moving and stamina > 0
+		if active then stamina = math.max(0, stamina - dt / 4) else stamina = math.min(1, stamina + dt / 6) end
+		hum.WalkSpeed = active and base * 1.45 or base
+	end
+	staminaFill.Size = UDim2.fromScale(stamina, 1)
+	staminaFill.BackgroundColor3 = stamina < 0.25 and Color3.fromRGB(230, 70, 60) or Color3.fromRGB(80, 220, 120)
+	if charging then chargeFill.Size = UDim2.fromScale(chargeLevel(), 1) end
+end)
+
+local function shot(_, st)
+	if st == Enum.UserInputState.Begin then
+		charging, chargeStart = true, os.clock()
+		chargeBack.Visible = true
+	elseif st == Enum.UserInputState.End and charging then
+		charging = false
+		chargeBack.Visible = false
+		Kick:FireServer("Shot", chargeLevel())
+	end
+	return Enum.ContextActionResult.Pass
+end
+CAS:BindAction("UP_Shot", shot, true, Enum.KeyCode.F, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
+CAS:SetTitle("UP_Shot", "Schuss")
+
+CAS:BindAction("UP_Sprint", function(_, st)
+	if st == Enum.UserInputState.Begin then sprinting = true
+	elseif st == Enum.UserInputState.End or st == Enum.UserInputState.Cancel then sprinting = false end
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3)
+CAS:SetTitle("UP_Sprint", "Sprint")
+
+CAS:BindAction("UP_Pass", function(_, st)
+	if st == Enum.UserInputState.Begin then Kick:FireServer("Pass") end
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.E, Enum.KeyCode.ButtonX)
+CAS:SetTitle("UP_Pass", "Pass")
+
 CAS:SetPosition("UP_Shot", UDim2.new(0.15, 0, 0.05, 0))
 CAS:SetPosition("UP_Pass", UDim2.new(-0.25, 0, 0.45, 0))
-]==]
-
-new("Script", { Name = "UltimatePitchServer", Source = SERVER }, SSS)
-new("LocalScript", { Name = "UltimatePitchClient", Source = CLIENT }, SPS)
-
-CHS:SetWaypoint("UltimatePitch v" .. VERSION .. " installiert")
-print("✅ UltimatePitch v" .. VERSION .. " installiert – Play drücken!")
+CAS:SetPosition("UP_Sprint", UDim2.new(-0.25, 0, 0.0, 0))
+]==] c.Parent = SPS
+game:GetService("ChangeHistoryService"):SetWaypoint("UltimatePitch v0.4")
+print("✅ UltimatePitch v0.4 installiert – Spielen drücken!")
