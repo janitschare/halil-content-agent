@@ -9,6 +9,10 @@
 local VERSION = "0.3"
 local GY = 1 -- Oberkante Rasen
 
+if game:GetService("RunService"):IsRunning() then
+	error("❌ UltimatePitch: Erst Test stoppen (rotes Quadrat), dann Installer erneut ausführen!")
+end
+
 local CHS = game:GetService("ChangeHistoryService")
 local RS = game:GetService("ReplicatedStorage")
 local SSS = game:GetService("ServerScriptService")
