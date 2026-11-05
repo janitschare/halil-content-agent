@@ -226,7 +226,7 @@ end
 local CFG = {
 	MatchTime = 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
 	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
-	KickRange = 5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
+	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
 }
 
@@ -617,8 +617,13 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, power)
 	local now = os.clock()
 	if (lastKick[plr] or 0) + 0.35 > now then return end
 	local rel = Ball.Position - root.Position
-	if flat(rel).Magnitude > CFG.KickRange or math.abs(rel.Y) > 5 then return end
+	-- Schuss mit Toleranz: der Ball rollt beim Aufladen etwas weg
+	local range = kind == "Pass" and CFG.KickRange or CFG.ShotRange
 	lastKick[plr] = now
+	if flat(rel).Magnitude > range or math.abs(rel.Y) > 5 then
+		KickEvent:FireClient(plr, "TooFar")
+		return
+	end
 	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td.sign, 0, 0))
 	if kind == "Pass" then
 		kickBall(look * CFG.PassPower + Vector3.new(0, 3, 0))
@@ -783,6 +788,10 @@ State.AttributeChanged:Connect(function(name)
 	if name == "MessageId" then showMsg(State:GetAttribute("Message")) end
 end)
 refresh()
+
+Kick.OnClientEvent:Connect(function(what)
+	if what == "TooFar" then showMsg("Zu weit vom Ball!") end
+end)
 
 local RunService = game:GetService("RunService")
 
