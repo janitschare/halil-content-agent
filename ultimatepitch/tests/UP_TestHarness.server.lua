@@ -93,20 +93,28 @@ end
 Ball.Anchored = false
 
 -- Echter Schuss je Client (LocalScript feuert das RemoteEvent)
+-- Der Ball wird vor die tatsaechliche Spielerposition gelegt: Die Figur gehoert physikalisch dem Client,
+-- ein Server-Teleport kann vom Client ueberschrieben werden.
 for i, p in ipairs(plist) do
-	p.Character:PivotTo(CFrame.lookAt(Vector3.new(-3, 4.5, -40), Vector3.new(10, 4.5, -40)))
+	local root = p.Character.HumanoidRootPart
+	local look = root.CFrame.LookVector * Vector3.new(1, 0, 1)
+	look = look.Magnitude > 0.01 and look.Unit or Vector3.new(1, 0, 0)
 	Ball.AssemblyLinearVelocity = Vector3.zero
-	Ball.CFrame = CFrame.new(-0.5, 2.1, -40)
+	Ball.CFrame = CFrame.new(root.Position.X + look.X * 2.5, 2.1, root.Position.Z + look.Z * 2.5)
 	task.wait(0.3)
-	local res
+	local res, dist
 	local conn = Kick.OnServerEvent:Connect(function(plr)
-		if plr == p then task.defer(function() res = Ball.AssemblyLinearVelocity.Magnitude end) end
+		if plr == p then
+			local d = ((Ball.Position - root.Position) * Vector3.new(1, 0, 1)).Magnitude
+			task.defer(function() res, dist = Ball.AssemblyLinearVelocity.Magnitude, d end)
+		end
 	end)
 	folder:SetAttribute("Kicker", p.Name)
 	folder:SetAttribute("Step", "kick" .. i)
 	waitFor(function() return res ~= nil end, 20)
 	conn:Disconnect()
-	log((res and res > 40) and ("OK Schuss " .. p.Name .. " v=" .. math.floor(res)) or ("FAIL Schuss " .. p.Name .. " v=" .. tostring(res)))
+	log(("%s Schuss %s v=%s dist=%s"):format((res and res > 40) and "OK" or "FAIL", p.Name,
+		res and math.floor(res) or "nil", dist and ("%.1f"):format(dist) or "nil"))
 	task.wait(0.5)
 end
 
