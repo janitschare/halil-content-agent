@@ -1,0 +1,272 @@
+-- UltimatePitch · AURORA BREAK Darstellung (ModuleScript unter UltimatePitchClient)
+-- Reine Optik: reagiert auf Server-Ereignisse (AuroraWindup/AuroraKick/AuroraCancel, GoalSeq) und entscheidet nichts.
+-- Kickanimation prozedural über R15-Motor6D.Transform (keine hochgeladene Animation), Kick-Marker bei Anlaufende.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local Lighting = game:GetService("Lighting")
+
+local AuroraFX = {}
+AuroraFX.reducedMotion = false
+AuroraFX.markers = {} -- Testmesswerte: Zeitpunkte von Anlauf, Kick-Marker und Server-Kick je Schütze
+
+local GREEN = Color3.fromRGB(70, 255, 150)
+local CYAN = Color3.fromRGB(40, 220, 255)
+local GOLD = Color3.fromRGB(255, 200, 60)
+local WHITE = Color3.fromRGB(245, 255, 250)
+
+local fxFolder = Instance.new("Folder")
+fxFolder.Name = "UP_LocalFX"
+fxFolder.Parent = workspace
+
+local function fxPart(props, life)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.Neon
+	for k, v in pairs(props) do p[k] = v end
+	p.Parent = fxFolder
+	Debris:AddItem(p, life)
+	return p
+end
+
+-- Posen als Winkel (rad) je Gelenk; Zeit relativ zum Kick-Marker (0 = Ballkontakt)
+local POSES = {
+	{ t = -0.30, hip = 0, knee = 0, waist = 0, lsh = 0, rsh = 0 },
+	{ t = -0.10, hip = 0.95, knee = -1.25, waist = 0.35, lsh = -0.9, rsh = 0.7 },   -- Ausholen
+	{ t = 0.00, hip = -1.35, knee = -0.15, waist = -0.25, lsh = 0.5, rsh = -0.6 },  -- Kontakt (Marker "Kick")
+	{ t = 0.12, hip = -1.6, knee = 0, waist = -0.35, lsh = 0.7, rsh = -0.8 },       -- Durchschwung
+	{ t = 0.45, hip = 0, knee = 0, waist = 0, lsh = 0, rsh = 0 },                   -- Ausschwingen
+}
+
+local function sample(t)
+	if t <= POSES[1].t then return POSES[1] end
+	for i = 1, #POSES - 1 do
+		local a, b = POSES[i], POSES[i + 1]
+		if t <= b.t then
+			local u = (t - a.t) / (b.t - a.t)
+			u = u * u * (3 - 2 * u)
+			local out = {}
+			for k, v in pairs(a) do out[k] = v + (b[k] - v) * u end
+			return out
+		end
+	end
+	return POSES[#POSES]
+end
+
+local function motor(char, partName, motorName)
+	local p = char:FindFirstChild(partName)
+	return p and p:FindFirstChild(motorName)
+end
+
+-- Prozedurale R15-Kickanimation; meldet den Kick-Marker über onMarker
+local function playKick(char, windup, onMarker)
+	local joints = {
+		hip = motor(char, "RightUpperLeg", "RightHip"),
+		knee = motor(char, "RightLowerLeg", "RightKnee"),
+		waist = motor(char, "UpperTorso", "Waist"),
+		lsh = motor(char, "LeftUpperArm", "LeftShoulder"),
+		rsh = motor(char, "RightUpperArm", "RightShoulder"),
+	}
+	if not joints.hip then return end
+	local start = os.clock()
+	local fired = false
+	local conn
+	conn = RunService.Stepped:Connect(function()
+		local t = os.clock() - start - windup
+		if not char.Parent then conn:Disconnect() return end
+		local pose = sample(t)
+		if joints.hip then joints.hip.Transform = CFrame.Angles(pose.hip, 0, 0) end
+		if joints.knee then joints.knee.Transform = CFrame.Angles(pose.knee, 0, 0) end
+		if joints.waist then joints.waist.Transform = CFrame.Angles(0, pose.waist, 0) end
+		if joints.lsh then joints.lsh.Transform = CFrame.Angles(0, 0, pose.lsh) end
+		if joints.rsh then joints.rsh.Transform = CFrame.Angles(0, 0, pose.rsh) end
+		if not fired and t >= 0 then
+			fired = true
+			onMarker("Kick")
+		end
+		if t > POSES[#POSES].t then conn:Disconnect() end
+	end)
+end
+
+local function ringBurst(pos, color, delay, size, life)
+	task.delay(delay, function()
+		local ring = fxPart({ Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 2, 2), Color = color, Transparency = 0.2,
+			CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90)) }, life + 0.1)
+		TweenService:Create(ring, TweenInfo.new(life, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{ Size = Vector3.new(0.2, size, size), Transparency = 1 }):Play()
+	end)
+end
+
+local function flash(root, color, brightness, life)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 18
+	light.Brightness = brightness
+	light.Parent = root
+	TweenService:Create(light, TweenInfo.new(life), { Brightness = 0 }):Play()
+	Debris:AddItem(light, life + 0.05)
+end
+
+local function cameraPush(amount)
+	local cam = workspace.CurrentCamera
+	if AuroraFX.reducedMotion or not cam then return end
+	local base = 70
+	TweenService:Create(cam, TweenInfo.new(0.1, Enum.EasingStyle.Quad), { FieldOfView = base + amount }):Play()
+	task.delay(0.16, function()
+		TweenService:Create(cam, TweenInfo.new(0.45, Enum.EasingStyle.Quad), { FieldOfView = base }):Play()
+	end)
+end
+
+local function charOf(userId)
+	local plr = Players:GetPlayerByUserId(userId)
+	return plr and plr.Character, plr
+end
+
+-- Anlauf: Animation + gestaffelte Ringe; volle Effektmenge nur für den eigenen Schützen (FX-Budget)
+function AuroraFX.windup(userId, windup)
+	local char, plr = charOf(userId)
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local own = plr == Players.LocalPlayer
+	AuroraFX.markers[userId] = { windupAt = os.clock() }
+	local feet = root.Position - Vector3.new(0, 2.8, 0)
+	ringBurst(feet, GREEN, 0, 14, 0.4)
+	ringBurst(feet, CYAN, 0.08, 18, 0.4)
+	if own then ringBurst(feet, GOLD, 0.16, 22, 0.45) end
+	flash(root, GREEN, own and 5 or 2.5, windup + 0.2)
+	playKick(char, windup, function(name)
+		local m = AuroraFX.markers[userId]
+		if not m then return end
+		m.markerAt = os.clock()
+		m.marker = name
+		-- Messwert für Tests (lokal, nicht repliziert): Abstand Anlaufbeginn -> Kick-Marker
+		if own then Players.LocalPlayer:SetAttribute("AuroraMarkerDelay", m.markerAt - m.windupAt) end
+	end)
+end
+
+-- Server hat am Kick-Marker geschossen: Ball-Kern, Spur, Streifen, Bodenimpuls, Kamera
+function AuroraFX.kick(userId, ball)
+	local char, plr = charOf(userId)
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local own = plr == Players.LocalPlayer
+	local m = AuroraFX.markers[userId]
+	if m then
+		m.kickAt = os.clock()
+		-- Messwert für Tests: Abstand Anlaufbeginn -> serverbestätigter Schuss
+		if own then Players.LocalPlayer:SetAttribute("AuroraKickDelay", m.kickAt - m.windupAt) end
+	end
+	if not ball then return end
+	local life = 1.1
+	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(3.4, 3.4, 3.4), Color = WHITE, Transparency = 0.25,
+		CFrame = ball.CFrame }, life + 0.1)
+	local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0, 0.9, 0); a0.Parent = core
+	local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(0, -0.9, 0); a1.Parent = core
+	local trail = Instance.new("Trail")
+	trail.Attachment0, trail.Attachment1 = a0, a1
+	trail.Lifetime = 0.35
+	trail.LightEmission = 1
+	trail.Color = ColorSequence.new(GREEN, CYAN)
+	trail.Transparency = NumberSequence.new(0.1, 1)
+	trail.Parent = core
+	local glow = Instance.new("PointLight"); glow.Color = GREEN; glow.Range = 16; glow.Brightness = 3; glow.Parent = core
+	TweenService:Create(core, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(1.6, 1.6, 1.6), Transparency = 0.8 }):Play()
+	local follow
+	follow = RunService.RenderStepped:Connect(function()
+		if not core.Parent or not ball.Parent then follow:Disconnect() return end
+		core.CFrame = ball.CFrame
+	end)
+	task.delay(life, function() if follow.Connected then follow:Disconnect() end end)
+
+	local origin = root and root.Position or ball.Position
+	local forward = root and Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit or Vector3.new(1, 0, 0)
+	ringBurst(origin - Vector3.new(0, 2.8, 0), WHITE, 0, own and 26 or 16, 0.35)
+	local streaks = own and 10 or 4
+	for i = 1, streaks do
+		local angle = (i / streaks) * math.pi * 2
+		local dir = (CFrame.fromAxisAngle(Vector3.yAxis, angle) * forward)
+		local s = fxPart({ Size = Vector3.new(0.25, 0.25, 6), Color = i % 2 == 0 and GREEN or WHITE, Transparency = 0.1,
+			CFrame = CFrame.lookAt(origin + dir * 3, origin + dir * 9) }, 0.4)
+		TweenService:Create(s, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = CFrame.lookAt(origin + dir * 14, origin + dir * 22), Transparency = 1 }):Play()
+	end
+	if own then cameraPush(14) elseif root and workspace.CurrentCamera
+		and (workspace.CurrentCamera.CFrame.Position - root.Position).Magnitude < 60 then cameraPush(5) end
+end
+
+function AuroraFX.cancel(userId)
+	AuroraFX.markers[userId] = nil
+end
+
+-- GOAL-Cinematic: nur auf das serverbestätigte Tor-Ereignis (GoalSeq), nie bei Fehlschüssen
+function AuroraFX.goal(gui, team, aurora)
+	-- Banner in Bildmitte (Torpause, kein laufendes Spiel): großer goldener Titel + Untertitel
+	local banner = Instance.new("Frame")
+	banner.Name = "GoalBanner"
+	banner.AnchorPoint = Vector2.new(0.5, 0.5)
+	banner.Position = UDim2.fromScale(0.5, 0.55)
+	banner.Size = UDim2.fromOffset(640, 190)
+	banner.BackgroundTransparency = 1
+	banner.Rotation = -4
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 140)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBlack
+	title.TextScaled = true
+	title.Text = "GOAL!"
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.Parent = banner
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new(Color3.fromRGB(255, 244, 170), GOLD)
+	gradient.Rotation = 90
+	gradient.Parent = title
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(90, 50, 0)
+	stroke.Thickness = 5
+	stroke.Parent = title
+	local sub = Instance.new("TextLabel")
+	sub.Position = UDim2.fromOffset(0, 140)
+	sub.Size = UDim2.new(1, 0, 0, 44)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.GothamBlack
+	sub.TextScaled = true
+	sub.Text = (aurora and "AURORA BREAK  ·  " or "") .. string.upper(team)
+	sub.TextColor3 = aurora and Color3.fromRGB(150, 255, 200) or Color3.new(1, 1, 1)
+	sub.TextStrokeTransparency = 0.2
+	sub.Parent = banner
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.4
+	scale.Parent = banner
+	banner.Parent = gui
+	TweenService:Create(scale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(1.3, function()
+		TweenService:Create(title, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+		TweenService:Create(stroke, TweenInfo.new(0.3), { Transparency = 1 }):Play()
+		TweenService:Create(sub, TweenInfo.new(0.3), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	end)
+	Debris:AddItem(banner, 1.7)
+	if AuroraFX.reducedMotion then return end
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Name = "UP_GoalGrade"
+	cc.Saturation = aurora and -0.75 or -0.4
+	cc.Contrast = 0.15
+	cc.Parent = Lighting
+	TweenService:Create(cc, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Saturation = 0, Contrast = 0 }):Play()
+	Debris:AddItem(cc, 1.1)
+	if aurora then
+		local white = Instance.new("Frame")
+		white.Size = UDim2.fromScale(1, 1)
+		white.BackgroundColor3 = WHITE
+		white.BackgroundTransparency = 0.55
+		white.ZIndex = 0
+		white.Parent = gui
+		TweenService:Create(white, TweenInfo.new(0.35), { BackgroundTransparency = 1 }):Play()
+		Debris:AddItem(white, 0.4)
+	end
+end
+
+return AuroraFX

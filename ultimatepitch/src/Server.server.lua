@@ -107,6 +107,7 @@ local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.85, Col
 local function wall(size, pos)
 	local p = part({ Name = "Wall", Size = size, Position = pos }, walls)
 	for k, val in pairs(glass) do p[k] = val end
+	return p
 end
 wall(Vector3.new(164, 20, 2), Vector3.new(0, GY + 10, -51))
 wall(Vector3.new(164, 20, 2), Vector3.new(0, GY + 10, 51))
@@ -115,7 +116,8 @@ for _, s in ipairs({ -1, 1 }) do
 	wall(Vector3.new(2, 20, 38), Vector3.new(s * 81, GY + 10, 31))
 	wall(Vector3.new(2, 10, 24), Vector3.new(s * 81, GY + 15, 0))
 end
-wall(Vector3.new(164, 2, 104), Vector3.new(0, GY + 21, 0)) -- Dach (unsichtbar)
+-- Deckel hält den Ball im Feld; unsichtbar, damit das offene Stadiondach sichtbar bleibt
+wall(Vector3.new(164, 2, 104), Vector3.new(0, GY + 21, 0)).Transparency = 1
 
 -- Ball
 local ball = part({
@@ -158,38 +160,16 @@ new("Team", { Name = "Blau", TeamColor = BrickColor.new("Really blue"), AutoAssi
 ------------------------------------------------------------------ Shared
 local shared = new("Folder", { Name = "UltimatePitch" }, RS)
 local state = new("Folder", { Name = "State" }, shared)
-for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION }) do
+for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION,
+	GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false }) do
 	state:SetAttribute(k, val)
 end
 new("RemoteEvent", { Name = "Kick" }, shared)
+new("RemoteEvent", { Name = "Effect" }, shared) -- nur Darstellung: Server meldet Skill-Phasen an alle Clients
 
--- Tribünen mit Fans
+-- Stadion SPECTRA DOME (Tribünenkessel, Dach, LED, Flutlicht, Anzeigetafel) als eigenes Modul
 local stands = new("Folder", { Name = "Stands" }, root)
-local FAN = { Color3.fromRGB(215, 40, 40), Color3.fromRGB(40, 90, 230), Color3.fromRGB(240, 240, 240),
-	Color3.fromRGB(255, 200, 40), Color3.fromRGB(30, 30, 30) }
-for _, side in ipairs({ -1, 1 }) do
-	for row = 1, 6 do
-		local z = side * (54 + row * 3)
-		local h = row * 2
-		part({ Name = "Step", Size = Vector3.new(170, h, 3), Position = Vector3.new(0, GY + h / 2, z),
-			Material = Enum.Material.Concrete, Color = Color3.fromRGB(90, 95, 105) }, stands)
-		for x = -82, 82, 3.4 do
-			if math.random() < 0.8 then
-				part({ Name = "Fan", Size = Vector3.new(1.4, 2.4, 1), Position = Vector3.new(x + math.random() - 0.5, GY + h + 1.2, z),
-					Color = FAN[math.random(#FAN)], CanCollide = false, CanQuery = false, CanTouch = false }, stands)
-			end
-		end
-	end
-end
-for _, s in ipairs({ -1, 1 }) do -- Flutlichter
-	for _, z in ipairs({ -1, 1 }) do
-		local pole = part({ Name = "Floodlight", Size = Vector3.new(2, 50, 2), Position = Vector3.new(s * 90, GY + 25, z * 75),
-			Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal }, stands)
-		local lamp = part({ Name = "Lamp", Size = Vector3.new(8, 4, 2), Position = pole.Position + Vector3.new(0, 26, 0),
-			Color = Color3.fromRGB(255, 250, 220), Material = Enum.Material.Neon }, stands)
-		new("SpotLight", { Brightness = 3, Range = 60, Angle = 70, Face = Enum.NormalId.Bottom }, lamp)
-	end
-end
+require(script:WaitForChild("Dome")).build(root, GY, state)
 
 -- Sounds (IDs bei Bedarf in Eigenschaften austauschen)
 local sounds = new("Folder", { Name = "Sounds" }, shared)
@@ -238,16 +218,17 @@ for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	if o then o:Destroy() end
 end
 pcall(function()
-	Lighting.ClockTime = 17.4
-	Lighting.Brightness = 2.2
-	Lighting.OutdoorAmbient = Color3.fromRGB(120, 124, 140)
+	Lighting.ClockTime = 17.6
+	Lighting.Brightness = 2.6
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 160, 185)
+	Lighting.Ambient = Color3.fromRGB(70, 80, 105)
 	Lighting.EnvironmentDiffuseScale = 0.5
 	Lighting.EnvironmentSpecularScale = 0.5
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.25, Offset = 0.1, Color = Color3.fromRGB(200, 205, 225),
-	Decay = Color3.fromRGB(110, 110, 150), Glare = 0.3, Haze = 1 }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.22, Offset = 0.1, Color = Color3.fromRGB(150, 175, 230),
+	Decay = Color3.fromRGB(70, 90, 160), Glare = 0.3, Haze = 1 }, Lighting)
 new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.5, Size = 28, Threshold = 1.7 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Contrast = 0.08, Saturation = 0.1, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.04, Contrast = 0.12, Saturation = 0.12, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
 
 end
 
@@ -276,6 +257,13 @@ local CFG = {
 	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
 	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
+	-- Server-Autorität (eigene Testwerte): Schussladung wird serverseitig gemessen, Ausdauer serverseitig geführt
+	ChargeTime = 1, ChargeMaxHold = 4,
+	StaminaMax = 100, SprintDrain = 25, StaminaRegen = 16, SprintMinStamina = 5,
+	MoveSlack = 6, MoveSample = 0.25,
+	-- AURORA BREAK (Elite-Abschluss, eigene Testwerte)
+	AuroraRange = 6, AuroraCooldown = 12, AuroraStamina = 30, AuroraWindup = 0.3,
+	AuroraSpeed = 128, AuroraLift = 9, AuroraGoalWindow = 2,
 }
 
 local TEAM = {
@@ -291,7 +279,21 @@ local phase = "Lobby"
 local roster = { Rot = {}, Blau = {} }
 local scores = { Rot = 0, Blau = 0 }
 local pendingGoal = nil
+local pendingGoalAurora = false
 local botCd, lastKick = {}, {}
+-- Serverseitiger Spielerzustand: Schussladung, Sprint-Wunsch, Ausdauer, Bewegungs-Stichprobe, Skill-Cooldown
+local chargeStart, sprintWanted, stamina, motion, auroraReady = {}, {}, {}, {}, {}
+local auroraHold = nil      -- { player, releaseAt } während des Anlaufs: Ball wird vor dem Spieler gehalten
+local auroraFlightUntil = 0 -- Tore bis zu diesem Zeitpunkt zählen als AURORA-BREAK-Tor (nur Darstellung)
+local EffectEvent = SHARED:WaitForChild("Effect")
+
+-- Gewollter Server-Teleport: Bezugspunkt der Bewegungsprüfung mitziehen, sonst würde sie zurücksetzen
+local function teleport(plr, cf)
+	local char = plr.Character
+	if not char then return end
+	char:PivotTo(cf)
+	motion[plr] = { pos = cf.Position, t = os.clock() }
+end
 
 local function flat(vec) return Vector3.new(vec.X, 0, vec.Z) end
 local function unit(vec, fallback)
@@ -393,7 +395,7 @@ end
 local function placePlayer(plr, teamName, slot)
 	local char = plr.Character
 	if not char then return end
-	char:PivotTo(slotCF(TEAM[teamName], slot))
+	teleport(plr, slotCF(TEAM[teamName], slot))
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum.WalkSpeed = CFG.PlayerSpeed end
 	char:SetAttribute("BaseSpeed", CFG.PlayerSpeed)
@@ -584,7 +586,7 @@ local function cleanup()
 		local char = plr.Character
 		if char then
 			highlight(char, nil)
-			char:PivotTo(LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+			teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
 			local hum = char:FindFirstChildOfClass("Humanoid")
 			if hum then hum.WalkSpeed = 16 end
 			char:SetAttribute("BaseSpeed", 16)
@@ -613,6 +615,11 @@ local function runMatch()
 			local t = pendingGoal
 			scores[t] += 1
 			updateScore()
+			-- Serverbestätigtes Tor-Ereignis für das GOAL-Cinematic der Clients
+			State:SetAttribute("LastGoalTeam", t)
+			State:SetAttribute("LastGoalAurora", pendingGoalAurora)
+			State:SetAttribute("GoalSeq", (State:GetAttribute("GoalSeq") or 0) + 1)
+			pendingGoalAurora = false
 			setPhase("Goal")
 			if golden then
 				winner = t
@@ -654,8 +661,20 @@ local function runMatch()
 end
 
 ---------------------------------------------------------------- Events
-KickEvent.OnServerEvent:Connect(function(plr, kind, power)
-	if not inMatch() or pendingGoal then return end
+-- Client meldet nur Absichten: "ChargeStart", "Shot", "Pass", "Sprint" (true/false), "Aurora".
+-- Schussstärke, Ausdauer, Reichweite, Cooldowns und Tore entscheidet ausschließlich der Server.
+KickEvent.OnServerEvent:Connect(function(plr, kind, arg)
+	if type(kind) ~= "string" then return end
+	if kind == "Sprint" then
+		sprintWanted[plr] = arg == true
+		return
+	end
+	if kind == "ChargeStart" then
+		chargeStart[plr] = os.clock()
+		return
+	end
+	if kind ~= "Pass" and kind ~= "Shot" and kind ~= "Aurora" then return end
+	if not inMatch() or pendingGoal or auroraHold then return end
 	local teamName = plr.Team and plr.Team.Name
 	local td = TEAM[teamName]
 	if not td then return end
@@ -666,20 +685,56 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, power)
 	if (lastKick[plr] or 0) + 0.35 > now then return end
 	local rel = Ball.Position - root.Position
 	-- Schuss mit Toleranz: der Ball rollt beim Aufladen etwas weg
-	local range = kind == "Pass" and CFG.KickRange or CFG.ShotRange
+	local range = (kind == "Pass" and CFG.KickRange) or (kind == "Aurora" and CFG.AuroraRange) or CFG.ShotRange
 	lastKick[plr] = now
 	if flat(rel).Magnitude > range or math.abs(rel.Y) > 5 then
+		chargeStart[plr] = nil
 		KickEvent:FireClient(plr, "TooFar")
 		return
 	end
 	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td.sign, 0, 0))
 	if kind == "Pass" then
 		kickBall(look * CFG.PassPower + Vector3.new(0, 3, 0))
-	else
-		local pw = math.clamp(tonumber(power) or 0.6, 0, 1)
+	elseif kind == "Shot" then
+		-- Ladung = serverseitig gemessene Haltedauer seit "ChargeStart"; ein mitgeschickter Wert wird ignoriert
+		local began = chargeStart[plr]
+		chargeStart[plr] = nil
+		if not began or now - began > CFG.ChargeMaxHold then
+			KickEvent:FireClient(plr, "NoCharge")
+			return
+		end
+		local pw = math.clamp((now - began) / CFG.ChargeTime, 0, 1)
 		kickBall(look * (CFG.ShotMin + (CFG.ShotMax - CFG.ShotMin) * pw) + Vector3.new(0, 6 + 30 * pw, 0))
+	else
+		-- AURORA BREAK: Cooldown und Ausdauer serverseitig, dann Anlauf mit gehaltenem Ball bis zum Kick-Marker
+		if now < (auroraReady[plr] or 0) then KickEvent:FireClient(plr, "Cooldown") return end
+		if (stamina[plr] or 0) < CFG.AuroraStamina then KickEvent:FireClient(plr, "NoStamina") return end
+		stamina[plr] -= CFG.AuroraStamina
+		auroraReady[plr] = now + CFG.AuroraCooldown
+		plr:SetAttribute("AuroraReady", workspace:GetServerTimeNow() + CFG.AuroraCooldown)
+		auroraHold = { player = plr, releaseAt = now + CFG.AuroraWindup }
+		EffectEvent:FireAllClients("AuroraWindup", plr.UserId, CFG.AuroraWindup)
 	end
 end)
+
+-- Kick-Marker von AURORA BREAK: Server schießt selbst, sobald der Anlauf abgelaufen ist
+local function releaseAurora()
+	local hold = auroraHold
+	auroraHold = nil
+	local plr = hold.player
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not hum or hum.Health <= 0 or not inMatch() then
+		EffectEvent:FireAllClients("AuroraCancel", plr.UserId)
+		return
+	end
+	local td = TEAM[plr.Team and plr.Team.Name]
+	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td and td.sign or 1, 0, 0))
+	kickBall(look * CFG.AuroraSpeed + Vector3.new(0, CFG.AuroraLift, 0))
+	auroraFlightUntil = os.clock() + CFG.AuroraGoalWindow
+	EffectEvent:FireAllClients("AuroraKick", plr.UserId)
+end
 
 local function humansIn(teamName)
 	local n = 0
@@ -715,7 +770,7 @@ local function onCharacter(plr)
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
 		placePlayer(plr, teamName, slot)
 	elseif plr.Character then
-		plr.Character:PivotTo(LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
 		plr.Character:SetAttribute("BaseSpeed", 16)
 	end
 end
@@ -729,6 +784,8 @@ for _, p in ipairs(Players:GetPlayers()) do onPlayer(p) end
 
 Players.PlayerRemoving:Connect(function(plr)
 	lastKick[plr] = nil
+	chargeStart[plr], sprintWanted[plr], stamina[plr], motion[plr], auroraReady[plr] = nil, nil, nil, nil, nil
+	if auroraHold and auroraHold.player == plr then auroraHold = nil end
 	local teamName, slot = findPlayerSlot(plr)
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" then
 		roster[teamName][slot] = { kind = "bot", model = makeBot(TEAM[teamName], slot) }
@@ -737,12 +794,27 @@ end)
 
 local aiAcc = 0
 RunService.Heartbeat:Connect(function(dt)
-	if not inMatch() then return end
+	if not inMatch() then
+		if auroraHold then auroraHold = nil end
+		return
+	end
+	-- AURORA BREAK Anlauf: Ball liegt vor dem Schützen, bis der Server am Kick-Marker schießt
+	if auroraHold then
+		local root = auroraHold.player.Character and auroraHold.player.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			local look = unit(flat(root.CFrame.LookVector), Vector3.new(1, 0, 0))
+			Ball.AssemblyLinearVelocity = Vector3.zero
+			Ball.AssemblyAngularVelocity = Vector3.zero
+			Ball.CFrame = CFrame.new(Vector3.new(root.Position.X, CFG.GroundY + 1.1, root.Position.Z) + look * 2.6)
+		end
+		if os.clock() >= auroraHold.releaseAt then releaseAurora() end
+	end
 	local p = Ball.Position
 	-- Tor?
 	if not pendingGoal and math.abs(p.Z) < CFG.GoalHalfWidth and p.Y < CFG.GroundY + CFG.GoalHeight then
 		if p.X > CFG.HalfLength + 1.2 then pendingGoal = "Rot"
 		elseif p.X < -CFG.HalfLength - 1.2 then pendingGoal = "Blau" end
+		if pendingGoal then pendingGoalAurora = os.clock() < auroraFlightUntil end
 	end
 	-- Ball verloren?
 	if p.Y < -20 or math.abs(p.X) > 100 or math.abs(p.Z) > 70 then resetBall() end
@@ -755,9 +827,53 @@ RunService.Heartbeat:Connect(function(dt)
 	aiAcc += dt
 	if aiAcc >= 0.1 then
 		aiAcc = 0
-		if not pendingGoal then
+		if not pendingGoal and not auroraHold then
 			thinkTeam("Rot")
 			thinkTeam("Blau")
+		end
+	end
+end)
+
+-- Ausdauer, Sprint und Bewegungsplausibilität serverseitig (läuft auch außerhalb des Matches)
+RunService.Heartbeat:Connect(function(dt)
+	local now = os.clock()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local char = plr.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if hum and root and hum.Health > 0 then
+			local value = stamina[plr] or CFG.StaminaMax
+			local base = char:GetAttribute("BaseSpeed") or 16
+			local moving = hum.MoveDirection.Magnitude > 0.1
+			local sprinting = sprintWanted[plr] and moving and value > 0
+				and (value >= CFG.SprintMinStamina or hum.WalkSpeed > base)
+			if sprinting then
+				value = math.max(0, value - CFG.SprintDrain * dt)
+			else
+				value = math.min(CFG.StaminaMax, value + CFG.StaminaRegen * dt)
+			end
+			stamina[plr] = value
+			local speed = (sprinting and value > 0) and base * CFG.SprintFactor or base
+			if hum.WalkSpeed ~= speed then hum.WalkSpeed = speed end
+			local rounded = math.floor(value + 0.5)
+			if plr:GetAttribute("Stamina") ~= rounded then plr:SetAttribute("Stamina", rounded) end
+
+			-- Bewegung: horizontale Strecke seit der letzten Stichprobe darf das erlaubte Sprinttempo nicht übersteigen
+			local m = motion[plr]
+			if not m then
+				motion[plr] = { pos = root.Position, t = now }
+			else
+				local elapsed = now - m.t
+				local delta = flat(root.Position - m.pos).Magnitude
+				local allowed = base * CFG.SprintFactor * 1.15 * elapsed + CFG.MoveSlack
+				if delta > allowed then
+					char:PivotTo(CFrame.new(m.pos) * root.CFrame.Rotation)
+					m.t = now
+					plr:SetAttribute("MoveCorrections", (plr:GetAttribute("MoveCorrections") or 0) + 1)
+				elseif elapsed >= CFG.MoveSample then
+					m.pos, m.t = root.Position, now
+				end
+			end
 		end
 	end
 end)

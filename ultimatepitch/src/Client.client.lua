@@ -1,13 +1,16 @@
--- UltimatePitch v0.4 · Client (HUD, Sprint, Schusskraft)
+-- UltimatePitch v0.4 · Client (HUD, Eingaben, Effekte). Sendet nur Absichten; Ladung, Ausdauer, Tore entscheidet der Server.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local CAS = game:GetService("ContextActionService")
 local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 
 local player = Players.LocalPlayer
 local SHARED = RS:WaitForChild("UltimatePitch")
 local State = SHARED:WaitForChild("State")
 local Kick = SHARED:WaitForChild("Kick")
+local Effect = SHARED:WaitForChild("Effect")
+local AuroraFX = require(script:WaitForChild("AuroraFX"))
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "UltimatePitchHUD"
@@ -42,7 +45,7 @@ local big = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromSc
 big.TextStrokeTransparency = 1
 label({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12), Size = UDim2.fromOffset(420, 20),
 	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.25,
-	Text = "F / Klick halten = Schuss   ·   E = Pass   ·   Shift = Sprint" })
+	Text = "F / Klick halten = Schuss  ·  E = Pass  ·  Shift = Sprint  ·  R = AURORA BREAK  ·  M = Effekte reduzieren" })
 
 local function fmt(t) return string.format("%d:%02d", t // 60, t % 60) end
 
@@ -75,9 +78,38 @@ State.AttributeChanged:Connect(function(name)
 end)
 refresh()
 
+local REJECTS = { TooFar = "Zu weit vom Ball!", NoCharge = "Schuss nicht aufgeladen", Cooldown = "AURORA BREAK lädt noch", NoStamina = "Zu wenig Ausdauer" }
 Kick.OnClientEvent:Connect(function(what)
-	if what == "TooFar" then showMsg("Zu weit vom Ball!") end
+	if REJECTS[what] then showMsg(REJECTS[what]) end
 end)
+
+-- Skill-Effekte: Server meldet Anlauf, Kick-Marker-Schuss und Abbruch
+Effect.OnClientEvent:Connect(function(kind, userId, arg)
+	if type(userId) ~= "number" then return end
+	if kind == "AuroraWindup" then AuroraFX.windup(userId, tonumber(arg) or 0.3)
+	elseif kind == "AuroraKick" then AuroraFX.kick(userId, workspace:FindFirstChild("UltimatePitch") and workspace.UltimatePitch:FindFirstChild("Ball"))
+	elseif kind == "AuroraCancel" then AuroraFX.cancel(userId) end
+end)
+
+-- GOAL-Cinematic nur auf das serverbestätigte Tor-Ereignis
+local lastGoalSeq = State:GetAttribute("GoalSeq") or 0
+State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
+	local seq = State:GetAttribute("GoalSeq") or 0
+	if seq > lastGoalSeq then
+		AuroraFX.goal(gui, State:GetAttribute("LastGoalTeam") or "", State:GetAttribute("LastGoalAurora") == true)
+	end
+	lastGoalSeq = seq
+end)
+
+-- Grafikprofil: bei niedriger Qualitätsstufe Zuschauer und Sitzreihen lokal ausblenden (Kollisionen unverändert)
+local function applyProfile()
+	local ok, level = pcall(function() return UserSettings().GameSettings.SavedQualityLevel.Value end)
+	local low = ok and level > 0 and level <= 3
+	for _, p in ipairs(CollectionService:GetTagged("UP_Crowd")) do
+		p.LocalTransparencyModifier = low and 1 or 0
+	end
+end
+task.delay(3, applyProfile)
 
 local RunService = game:GetService("RunService")
 
@@ -102,37 +134,36 @@ local _, staminaFill = meter(-40, Color3.fromRGB(80, 220, 120))
 local chargeBack, chargeFill = meter(-56, Color3.fromRGB(255, 170, 40))
 chargeBack.Visible = false
 
-local stamina, sprinting = 1, false
+-- Skill-Anzeige: AURORA BREAK bereit / Restsekunden (Cooldown-Ende kommt als Server-Zeitstempel)
+local skill = label({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -72), Size = UDim2.fromOffset(260, 22),
+	TextSize = 15, TextColor3 = Color3.fromRGB(70, 255, 150), Text = "R  AURORA BREAK  bereit" })
+
 local charging, chargeStart = false, 0
-local CHARGE_TIME = 1
+local CHARGE_TIME = 1 -- nur Anzeige; die gültige Ladung misst der Server
 
 local function chargeLevel()
 	return math.clamp((os.clock() - chargeStart) / CHARGE_TIME, 0, 1)
 end
 
-RunService.RenderStepped:Connect(function(dt)
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum then
-		local base = char:GetAttribute("BaseSpeed") or 16
-		local moving = hum.MoveDirection.Magnitude > 0.1
-		local active = sprinting and moving and stamina > 0
-		if active then stamina = math.max(0, stamina - dt / 4) else stamina = math.min(1, stamina + dt / 6) end
-		hum.WalkSpeed = active and base * 1.45 or base
-	end
+RunService.RenderStepped:Connect(function()
+	local stamina = (player:GetAttribute("Stamina") or 100) / 100
 	staminaFill.Size = UDim2.fromScale(stamina, 1)
 	staminaFill.BackgroundColor3 = stamina < 0.25 and Color3.fromRGB(230, 70, 60) or Color3.fromRGB(80, 220, 120)
 	if charging then chargeFill.Size = UDim2.fromScale(chargeLevel(), 1) end
+	local left = (player:GetAttribute("AuroraReady") or 0) - workspace:GetServerTimeNow()
+	skill.Text = left > 0 and string.format("R  AURORA BREAK  %ds", math.ceil(left)) or "R  AURORA BREAK  bereit"
+	skill.TextColor3 = left > 0 and Color3.fromRGB(150, 160, 175) or Color3.fromRGB(70, 255, 150)
 end)
 
 local function shot(_, st)
 	if st == Enum.UserInputState.Begin then
 		charging, chargeStart = true, os.clock()
 		chargeBack.Visible = true
+		Kick:FireServer("ChargeStart")
 	elseif st == Enum.UserInputState.End and charging then
 		charging = false
 		chargeBack.Visible = false
-		Kick:FireServer("Shot", chargeLevel())
+		Kick:FireServer("Shot")
 	end
 	return Enum.ContextActionResult.Pass
 end
@@ -140,11 +171,25 @@ CAS:BindAction("UP_Shot", shot, true, Enum.KeyCode.F, Enum.UserInputType.MouseBu
 CAS:SetTitle("UP_Shot", "Schuss")
 
 CAS:BindAction("UP_Sprint", function(_, st)
-	if st == Enum.UserInputState.Begin then sprinting = true
-	elseif st == Enum.UserInputState.End or st == Enum.UserInputState.Cancel then sprinting = false end
+	if st == Enum.UserInputState.Begin then Kick:FireServer("Sprint", true)
+	elseif st == Enum.UserInputState.End or st == Enum.UserInputState.Cancel then Kick:FireServer("Sprint", false) end
 	return Enum.ContextActionResult.Pass
 end, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3)
 CAS:SetTitle("UP_Sprint", "Sprint")
+
+CAS:BindAction("UP_Aurora", function(_, st)
+	if st == Enum.UserInputState.Begin then Kick:FireServer("Aurora") end
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
+CAS:SetTitle("UP_Aurora", "AURORA")
+
+CAS:BindAction("UP_ReducedMotion", function(_, st)
+	if st == Enum.UserInputState.Begin then
+		AuroraFX.reducedMotion = not AuroraFX.reducedMotion
+		showMsg(AuroraFX.reducedMotion and "Effekte reduziert" or "Effekte voll")
+	end
+	return Enum.ContextActionResult.Pass
+end, false, Enum.KeyCode.M)
 
 CAS:BindAction("UP_Pass", function(_, st)
 	if st == Enum.UserInputState.Begin then Kick:FireServer("Pass") end
@@ -155,3 +200,4 @@ CAS:SetTitle("UP_Pass", "Pass")
 CAS:SetPosition("UP_Shot", UDim2.new(0.15, 0, 0.05, 0))
 CAS:SetPosition("UP_Pass", UDim2.new(-0.25, 0, 0.45, 0))
 CAS:SetPosition("UP_Sprint", UDim2.new(-0.25, 0, 0.0, 0))
+CAS:SetPosition("UP_Aurora", UDim2.new(0.15, 0, 0.5, 0))

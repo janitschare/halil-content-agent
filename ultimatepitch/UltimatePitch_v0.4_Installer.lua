@@ -118,6 +118,7 @@ local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.85, Col
 local function wall(size, pos)
 	local p = part({ Name = "Wall", Size = size, Position = pos }, walls)
 	for k, val in pairs(glass) do p[k] = val end
+	return p
 end
 wall(Vector3.new(164, 20, 2), Vector3.new(0, GY + 10, -51))
 wall(Vector3.new(164, 20, 2), Vector3.new(0, GY + 10, 51))
@@ -126,7 +127,8 @@ for _, s in ipairs({ -1, 1 }) do
 	wall(Vector3.new(2, 20, 38), Vector3.new(s * 81, GY + 10, 31))
 	wall(Vector3.new(2, 10, 24), Vector3.new(s * 81, GY + 15, 0))
 end
-wall(Vector3.new(164, 2, 104), Vector3.new(0, GY + 21, 0)) -- Dach (unsichtbar)
+-- Deckel hält den Ball im Feld; unsichtbar, damit das offene Stadiondach sichtbar bleibt
+wall(Vector3.new(164, 2, 104), Vector3.new(0, GY + 21, 0)).Transparency = 1
 
 -- Ball
 local ball = part({
@@ -169,38 +171,16 @@ new("Team", { Name = "Blau", TeamColor = BrickColor.new("Really blue"), AutoAssi
 ------------------------------------------------------------------ Shared
 local shared = new("Folder", { Name = "UltimatePitch" }, RS)
 local state = new("Folder", { Name = "State" }, shared)
-for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION }) do
+for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION,
+	GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false }) do
 	state:SetAttribute(k, val)
 end
 new("RemoteEvent", { Name = "Kick" }, shared)
+new("RemoteEvent", { Name = "Effect" }, shared) -- nur Darstellung: Server meldet Skill-Phasen an alle Clients
 
--- Tribünen mit Fans
+-- Stadion SPECTRA DOME (Tribünenkessel, Dach, LED, Flutlicht, Anzeigetafel) als eigenes Modul
 local stands = new("Folder", { Name = "Stands" }, root)
-local FAN = { Color3.fromRGB(215, 40, 40), Color3.fromRGB(40, 90, 230), Color3.fromRGB(240, 240, 240),
-	Color3.fromRGB(255, 200, 40), Color3.fromRGB(30, 30, 30) }
-for _, side in ipairs({ -1, 1 }) do
-	for row = 1, 6 do
-		local z = side * (54 + row * 3)
-		local h = row * 2
-		part({ Name = "Step", Size = Vector3.new(170, h, 3), Position = Vector3.new(0, GY + h / 2, z),
-			Material = Enum.Material.Concrete, Color = Color3.fromRGB(90, 95, 105) }, stands)
-		for x = -82, 82, 3.4 do
-			if math.random() < 0.8 then
-				part({ Name = "Fan", Size = Vector3.new(1.4, 2.4, 1), Position = Vector3.new(x + math.random() - 0.5, GY + h + 1.2, z),
-					Color = FAN[math.random(#FAN)], CanCollide = false, CanQuery = false, CanTouch = false }, stands)
-			end
-		end
-	end
-end
-for _, s in ipairs({ -1, 1 }) do -- Flutlichter
-	for _, z in ipairs({ -1, 1 }) do
-		local pole = part({ Name = "Floodlight", Size = Vector3.new(2, 50, 2), Position = Vector3.new(s * 90, GY + 25, z * 75),
-			Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal }, stands)
-		local lamp = part({ Name = "Lamp", Size = Vector3.new(8, 4, 2), Position = pole.Position + Vector3.new(0, 26, 0),
-			Color = Color3.fromRGB(255, 250, 220), Material = Enum.Material.Neon }, stands)
-		new("SpotLight", { Brightness = 3, Range = 60, Angle = 70, Face = Enum.NormalId.Bottom }, lamp)
-	end
-end
+require(script:WaitForChild("Dome")).build(root, GY, state)
 
 -- Sounds (IDs bei Bedarf in Eigenschaften austauschen)
 local sounds = new("Folder", { Name = "Sounds" }, shared)
@@ -249,16 +229,17 @@ for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	if o then o:Destroy() end
 end
 pcall(function()
-	Lighting.ClockTime = 17.4
-	Lighting.Brightness = 2.2
-	Lighting.OutdoorAmbient = Color3.fromRGB(120, 124, 140)
+	Lighting.ClockTime = 17.6
+	Lighting.Brightness = 2.6
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 160, 185)
+	Lighting.Ambient = Color3.fromRGB(70, 80, 105)
 	Lighting.EnvironmentDiffuseScale = 0.5
 	Lighting.EnvironmentSpecularScale = 0.5
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.25, Offset = 0.1, Color = Color3.fromRGB(200, 205, 225),
-	Decay = Color3.fromRGB(110, 110, 150), Glare = 0.3, Haze = 1 }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.22, Offset = 0.1, Color = Color3.fromRGB(150, 175, 230),
+	Decay = Color3.fromRGB(70, 90, 160), Glare = 0.3, Haze = 1 }, Lighting)
 new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.5, Size = 28, Threshold = 1.7 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Contrast = 0.08, Saturation = 0.1, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.04, Contrast = 0.12, Saturation = 0.12, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
 
 end
 
@@ -287,6 +268,13 @@ local CFG = {
 	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
 	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
+	-- Server-Autorität (eigene Testwerte): Schussladung wird serverseitig gemessen, Ausdauer serverseitig geführt
+	ChargeTime = 1, ChargeMaxHold = 4,
+	StaminaMax = 100, SprintDrain = 25, StaminaRegen = 16, SprintMinStamina = 5,
+	MoveSlack = 6, MoveSample = 0.25,
+	-- AURORA BREAK (Elite-Abschluss, eigene Testwerte)
+	AuroraRange = 6, AuroraCooldown = 12, AuroraStamina = 30, AuroraWindup = 0.3,
+	AuroraSpeed = 128, AuroraLift = 9, AuroraGoalWindow = 2,
 }
 
 local TEAM = {
@@ -302,7 +290,21 @@ local phase = "Lobby"
 local roster = { Rot = {}, Blau = {} }
 local scores = { Rot = 0, Blau = 0 }
 local pendingGoal = nil
+local pendingGoalAurora = false
 local botCd, lastKick = {}, {}
+-- Serverseitiger Spielerzustand: Schussladung, Sprint-Wunsch, Ausdauer, Bewegungs-Stichprobe, Skill-Cooldown
+local chargeStart, sprintWanted, stamina, motion, auroraReady = {}, {}, {}, {}, {}
+local auroraHold = nil      -- { player, releaseAt } während des Anlaufs: Ball wird vor dem Spieler gehalten
+local auroraFlightUntil = 0 -- Tore bis zu diesem Zeitpunkt zählen als AURORA-BREAK-Tor (nur Darstellung)
+local EffectEvent = SHARED:WaitForChild("Effect")
+
+-- Gewollter Server-Teleport: Bezugspunkt der Bewegungsprüfung mitziehen, sonst würde sie zurücksetzen
+local function teleport(plr, cf)
+	local char = plr.Character
+	if not char then return end
+	char:PivotTo(cf)
+	motion[plr] = { pos = cf.Position, t = os.clock() }
+end
 
 local function flat(vec) return Vector3.new(vec.X, 0, vec.Z) end
 local function unit(vec, fallback)
@@ -404,7 +406,7 @@ end
 local function placePlayer(plr, teamName, slot)
 	local char = plr.Character
 	if not char then return end
-	char:PivotTo(slotCF(TEAM[teamName], slot))
+	teleport(plr, slotCF(TEAM[teamName], slot))
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum.WalkSpeed = CFG.PlayerSpeed end
 	char:SetAttribute("BaseSpeed", CFG.PlayerSpeed)
@@ -595,7 +597,7 @@ local function cleanup()
 		local char = plr.Character
 		if char then
 			highlight(char, nil)
-			char:PivotTo(LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+			teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
 			local hum = char:FindFirstChildOfClass("Humanoid")
 			if hum then hum.WalkSpeed = 16 end
 			char:SetAttribute("BaseSpeed", 16)
@@ -624,6 +626,11 @@ local function runMatch()
 			local t = pendingGoal
 			scores[t] += 1
 			updateScore()
+			-- Serverbestätigtes Tor-Ereignis für das GOAL-Cinematic der Clients
+			State:SetAttribute("LastGoalTeam", t)
+			State:SetAttribute("LastGoalAurora", pendingGoalAurora)
+			State:SetAttribute("GoalSeq", (State:GetAttribute("GoalSeq") or 0) + 1)
+			pendingGoalAurora = false
 			setPhase("Goal")
 			if golden then
 				winner = t
@@ -665,8 +672,20 @@ local function runMatch()
 end
 
 ---------------------------------------------------------------- Events
-KickEvent.OnServerEvent:Connect(function(plr, kind, power)
-	if not inMatch() or pendingGoal then return end
+-- Client meldet nur Absichten: "ChargeStart", "Shot", "Pass", "Sprint" (true/false), "Aurora".
+-- Schussstärke, Ausdauer, Reichweite, Cooldowns und Tore entscheidet ausschließlich der Server.
+KickEvent.OnServerEvent:Connect(function(plr, kind, arg)
+	if type(kind) ~= "string" then return end
+	if kind == "Sprint" then
+		sprintWanted[plr] = arg == true
+		return
+	end
+	if kind == "ChargeStart" then
+		chargeStart[plr] = os.clock()
+		return
+	end
+	if kind ~= "Pass" and kind ~= "Shot" and kind ~= "Aurora" then return end
+	if not inMatch() or pendingGoal or auroraHold then return end
 	local teamName = plr.Team and plr.Team.Name
 	local td = TEAM[teamName]
 	if not td then return end
@@ -677,20 +696,56 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, power)
 	if (lastKick[plr] or 0) + 0.35 > now then return end
 	local rel = Ball.Position - root.Position
 	-- Schuss mit Toleranz: der Ball rollt beim Aufladen etwas weg
-	local range = kind == "Pass" and CFG.KickRange or CFG.ShotRange
+	local range = (kind == "Pass" and CFG.KickRange) or (kind == "Aurora" and CFG.AuroraRange) or CFG.ShotRange
 	lastKick[plr] = now
 	if flat(rel).Magnitude > range or math.abs(rel.Y) > 5 then
+		chargeStart[plr] = nil
 		KickEvent:FireClient(plr, "TooFar")
 		return
 	end
 	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td.sign, 0, 0))
 	if kind == "Pass" then
 		kickBall(look * CFG.PassPower + Vector3.new(0, 3, 0))
-	else
-		local pw = math.clamp(tonumber(power) or 0.6, 0, 1)
+	elseif kind == "Shot" then
+		-- Ladung = serverseitig gemessene Haltedauer seit "ChargeStart"; ein mitgeschickter Wert wird ignoriert
+		local began = chargeStart[plr]
+		chargeStart[plr] = nil
+		if not began or now - began > CFG.ChargeMaxHold then
+			KickEvent:FireClient(plr, "NoCharge")
+			return
+		end
+		local pw = math.clamp((now - began) / CFG.ChargeTime, 0, 1)
 		kickBall(look * (CFG.ShotMin + (CFG.ShotMax - CFG.ShotMin) * pw) + Vector3.new(0, 6 + 30 * pw, 0))
+	else
+		-- AURORA BREAK: Cooldown und Ausdauer serverseitig, dann Anlauf mit gehaltenem Ball bis zum Kick-Marker
+		if now < (auroraReady[plr] or 0) then KickEvent:FireClient(plr, "Cooldown") return end
+		if (stamina[plr] or 0) < CFG.AuroraStamina then KickEvent:FireClient(plr, "NoStamina") return end
+		stamina[plr] -= CFG.AuroraStamina
+		auroraReady[plr] = now + CFG.AuroraCooldown
+		plr:SetAttribute("AuroraReady", workspace:GetServerTimeNow() + CFG.AuroraCooldown)
+		auroraHold = { player = plr, releaseAt = now + CFG.AuroraWindup }
+		EffectEvent:FireAllClients("AuroraWindup", plr.UserId, CFG.AuroraWindup)
 	end
 end)
+
+-- Kick-Marker von AURORA BREAK: Server schießt selbst, sobald der Anlauf abgelaufen ist
+local function releaseAurora()
+	local hold = auroraHold
+	auroraHold = nil
+	local plr = hold.player
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not hum or hum.Health <= 0 or not inMatch() then
+		EffectEvent:FireAllClients("AuroraCancel", plr.UserId)
+		return
+	end
+	local td = TEAM[plr.Team and plr.Team.Name]
+	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td and td.sign or 1, 0, 0))
+	kickBall(look * CFG.AuroraSpeed + Vector3.new(0, CFG.AuroraLift, 0))
+	auroraFlightUntil = os.clock() + CFG.AuroraGoalWindow
+	EffectEvent:FireAllClients("AuroraKick", plr.UserId)
+end
 
 local function humansIn(teamName)
 	local n = 0
@@ -726,7 +781,7 @@ local function onCharacter(plr)
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
 		placePlayer(plr, teamName, slot)
 	elseif plr.Character then
-		plr.Character:PivotTo(LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
 		plr.Character:SetAttribute("BaseSpeed", 16)
 	end
 end
@@ -740,6 +795,8 @@ for _, p in ipairs(Players:GetPlayers()) do onPlayer(p) end
 
 Players.PlayerRemoving:Connect(function(plr)
 	lastKick[plr] = nil
+	chargeStart[plr], sprintWanted[plr], stamina[plr], motion[plr], auroraReady[plr] = nil, nil, nil, nil, nil
+	if auroraHold and auroraHold.player == plr then auroraHold = nil end
 	local teamName, slot = findPlayerSlot(plr)
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" then
 		roster[teamName][slot] = { kind = "bot", model = makeBot(TEAM[teamName], slot) }
@@ -748,12 +805,27 @@ end)
 
 local aiAcc = 0
 RunService.Heartbeat:Connect(function(dt)
-	if not inMatch() then return end
+	if not inMatch() then
+		if auroraHold then auroraHold = nil end
+		return
+	end
+	-- AURORA BREAK Anlauf: Ball liegt vor dem Schützen, bis der Server am Kick-Marker schießt
+	if auroraHold then
+		local root = auroraHold.player.Character and auroraHold.player.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			local look = unit(flat(root.CFrame.LookVector), Vector3.new(1, 0, 0))
+			Ball.AssemblyLinearVelocity = Vector3.zero
+			Ball.AssemblyAngularVelocity = Vector3.zero
+			Ball.CFrame = CFrame.new(Vector3.new(root.Position.X, CFG.GroundY + 1.1, root.Position.Z) + look * 2.6)
+		end
+		if os.clock() >= auroraHold.releaseAt then releaseAurora() end
+	end
 	local p = Ball.Position
 	-- Tor?
 	if not pendingGoal and math.abs(p.Z) < CFG.GoalHalfWidth and p.Y < CFG.GroundY + CFG.GoalHeight then
 		if p.X > CFG.HalfLength + 1.2 then pendingGoal = "Rot"
 		elseif p.X < -CFG.HalfLength - 1.2 then pendingGoal = "Blau" end
+		if pendingGoal then pendingGoalAurora = os.clock() < auroraFlightUntil end
 	end
 	-- Ball verloren?
 	if p.Y < -20 or math.abs(p.X) > 100 or math.abs(p.Z) > 70 then resetBall() end
@@ -766,9 +838,53 @@ RunService.Heartbeat:Connect(function(dt)
 	aiAcc += dt
 	if aiAcc >= 0.1 then
 		aiAcc = 0
-		if not pendingGoal then
+		if not pendingGoal and not auroraHold then
 			thinkTeam("Rot")
 			thinkTeam("Blau")
+		end
+	end
+end)
+
+-- Ausdauer, Sprint und Bewegungsplausibilität serverseitig (läuft auch außerhalb des Matches)
+RunService.Heartbeat:Connect(function(dt)
+	local now = os.clock()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local char = plr.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if hum and root and hum.Health > 0 then
+			local value = stamina[plr] or CFG.StaminaMax
+			local base = char:GetAttribute("BaseSpeed") or 16
+			local moving = hum.MoveDirection.Magnitude > 0.1
+			local sprinting = sprintWanted[plr] and moving and value > 0
+				and (value >= CFG.SprintMinStamina or hum.WalkSpeed > base)
+			if sprinting then
+				value = math.max(0, value - CFG.SprintDrain * dt)
+			else
+				value = math.min(CFG.StaminaMax, value + CFG.StaminaRegen * dt)
+			end
+			stamina[plr] = value
+			local speed = (sprinting and value > 0) and base * CFG.SprintFactor or base
+			if hum.WalkSpeed ~= speed then hum.WalkSpeed = speed end
+			local rounded = math.floor(value + 0.5)
+			if plr:GetAttribute("Stamina") ~= rounded then plr:SetAttribute("Stamina", rounded) end
+
+			-- Bewegung: horizontale Strecke seit der letzten Stichprobe darf das erlaubte Sprinttempo nicht übersteigen
+			local m = motion[plr]
+			if not m then
+				motion[plr] = { pos = root.Position, t = now }
+			else
+				local elapsed = now - m.t
+				local delta = flat(root.Position - m.pos).Magnitude
+				local allowed = base * CFG.SprintFactor * 1.15 * elapsed + CFG.MoveSlack
+				if delta > allowed then
+					char:PivotTo(CFrame.new(m.pos) * root.CFrame.Rotation)
+					m.t = now
+					plr:SetAttribute("MoveCorrections", (plr:GetAttribute("MoveCorrections") or 0) + 1)
+				elseif elapsed >= CFG.MoveSample then
+					m.pos, m.t = root.Position, now
+				end
+			end
 		end
 	end
 end)
@@ -795,17 +911,238 @@ while true do
 		end
 	end
 end
-]==] s.Parent = SSS
-local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[-- UltimatePitch v0.4 · Client (HUD, Sprint, Schusskraft)
+]==]
+local sd = Instance.new("ModuleScript") sd.Name = "Dome" sd.Source = [==[-- UltimatePitch · SPECTRA DOME (ModuleScript unter UltimatePitchServer)
+-- Eigener prozeduraler Stadionbau aus Roblox-Grundteilen: elliptischer Zwei-Rang-Kessel mit Umlauf und
+-- Spielertunnel, Zuschauer im Unterrang, LED-Ringe (Cyan, Pink nur als Akzent), offenes Dach mit radialen
+-- Trägern, Flutlicht und Anzeigetafel. Keine externen Assets. Zuschauer und Sitzreihen tragen das Tag
+-- "UP_Crowd", damit Clients sie im Low-Grafikprofil ausblenden können.
+local CollectionService = game:GetService("CollectionService")
+
+local Dome = {}
+
+local SEGMENTS = 48
+local INNER_A, INNER_B = 118, 74 -- Innenkante des Kessels (Halbachsen X/Z); schließt Spielfeld samt Banden ein
+local LOWER_ROWS, UPPER_ROWS = 8, 10
+local ROW_DEPTH = 2.8
+local CONCOURSE = 6
+local ROOF_Y = 50
+local TUNNEL_SEGMENTS = { [12] = true, [13] = true } -- Unterrang-Lücke bei +Z (Mitte der Längsseite)
+
+local CONCRETE = Color3.fromRGB(38, 44, 62)
+local CONCRETE_UPPER = Color3.fromRGB(30, 35, 52)
+local STEEL = Color3.fromRGB(70, 78, 96)
+local CYAN = Color3.fromRGB(40, 210, 255)
+local BLUE = Color3.fromRGB(40, 90, 255)
+local PINK = Color3.fromRGB(255, 70, 170)
+local SEAT_COLORS = { Color3.fromRGB(28, 70, 190), Color3.fromRGB(220, 226, 236), Color3.fromRGB(20, 150, 210) }
+local FAN_COLORS = {
+	Color3.fromRGB(215, 40, 40), Color3.fromRGB(40, 90, 230), Color3.fromRGB(240, 240, 240),
+	Color3.fromRGB(255, 200, 40), Color3.fromRGB(30, 30, 30), Color3.fromRGB(40, 200, 220),
+}
+
+local function part(props, parent)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.CastShadow = false
+	for k, v in pairs(props) do p[k] = v end
+	p.Parent = parent
+	return p
+end
+
+local function deco(props, parent)
+	props.CanCollide = false
+	props.CanQuery = false
+	props.CanTouch = false
+	return part(props, parent)
+end
+
+-- Punkt auf der um d nach außen versetzten Ellipse
+local function ring(theta, d)
+	return Vector3.new((INNER_A + d) * math.cos(theta), 0, (INNER_B + d) * math.sin(theta))
+end
+
+-- Teil entlang eines Ellipsenbogens zwischen zwei Winkeln: X = Tiefe (radial), Y = Höhe, Z = Bogenlänge
+local function arcPart(theta1, theta2, d, y, depth, height, props, parent, isDeco)
+	local p1, p2 = ring(theta1, d), ring(theta2, d)
+	local mid = (p1 + p2) / 2 + Vector3.new(0, y, 0)
+	local length = (p2 - p1).Magnitude + 0.35
+	props.Size = Vector3.new(depth, height, length)
+	props.CFrame = CFrame.lookAt(mid, mid + (p2 - p1))
+	return (isDeco and deco or part)(props, parent)
+end
+
+local function rowRadius(row)
+	if row <= LOWER_ROWS then return (row - 0.5) * ROW_DEPTH end
+	return LOWER_ROWS * ROW_DEPTH + CONCOURSE + (row - LOWER_ROWS - 0.5) * ROW_DEPTH
+end
+
+local function rowTop(gy, row)
+	if row <= LOWER_ROWS then return gy + 1.5 + row * 1.5 end
+	return gy + 20 + (row - LOWER_ROWS) * 2.1
+end
+
+function Dome.build(root, gy, state)
+	local dome = Instance.new("Folder")
+	dome.Name = "SpectraDome"
+	local bowl = Instance.new("Folder"); bowl.Name = "Bowl"; bowl.Parent = dome
+	local crowd = Instance.new("Folder"); crowd.Name = "Crowd"; crowd.Parent = dome
+	local led = Instance.new("Folder"); led.Name = "LED"; led.Parent = dome
+	local roof = Instance.new("Folder"); roof.Name = "Roof"; roof.Parent = dome
+
+	local rng = Random.new(20261106)
+	local function tagCrowd(p) CollectionService:AddTag(p, "UP_Crowd") end
+
+	for i = 0, SEGMENTS - 1 do
+		local t1, t2 = i / SEGMENTS * math.pi * 2, (i + 1) / SEGMENTS * math.pi * 2
+		local sector = SEAT_COLORS[(math.floor(i / 4) % #SEAT_COLORS) + 1]
+		for row = 1, LOWER_ROWS + UPPER_ROWS do
+			local isLower = row <= LOWER_ROWS
+			if not (isLower and TUNNEL_SEGMENTS[i] and row <= 5) then
+				local d = rowRadius(row)
+				local top = rowTop(gy, row)
+				local base = isLower and gy or (gy + 14)
+				arcPart(t1, t2, d, (top + base) / 2, ROW_DEPTH + 0.05, top - base, {
+					Name = "Step", Material = Enum.Material.Concrete, Color = isLower and CONCRETE or CONCRETE_UPPER,
+				}, bowl)
+				-- Sitzreihe als farbiger Streifen, darauf Zuschauer (Unterrang einzeln, Oberrang als Farbfläche)
+				local seat = arcPart(t1, t2, d - 0.4, top + 0.35, 1.2, 0.7, {
+					Name = "Seats", Material = Enum.Material.Fabric, Color = sector,
+				}, crowd, true)
+				tagCrowd(seat)
+				if isLower then
+					for k = 1, 3 do
+						if rng:NextNumber() < 0.75 then
+							local a = t1 + (t2 - t1) * (k - 0.5) / 3
+							local pos = ring(a, d) + Vector3.new(0, top + 1.5, 0)
+							local fan = deco({
+								Name = "Fan", Size = Vector3.new(1.1, 2.1, 1.1),
+								CFrame = CFrame.lookAt(pos, Vector3.new(0, pos.Y, 0)),
+								Color = FAN_COLORS[rng:NextInteger(1, #FAN_COLORS)], Material = Enum.Material.SmoothPlastic,
+							}, crowd)
+							tagCrowd(fan)
+						end
+					end
+				else
+					local fill = arcPart(t1, t2, d + 0.3, top + 1.2, 1.4, 1.6, {
+						Name = "CrowdFill", Material = Enum.Material.Fabric,
+						Color = FAN_COLORS[rng:NextInteger(1, #FAN_COLORS)]:Lerp(sector, 0.35),
+					}, crowd, true)
+					tagCrowd(fill)
+				end
+			end
+		end
+
+		-- Umlauf zwischen den Rängen und Rückwand mit Tunnel-Ausschnitt
+		local concourseD = LOWER_ROWS * ROW_DEPTH + CONCOURSE / 2
+		arcPart(t1, t2, concourseD, gy + 14.5, CONCOURSE, 1, { Name = "Concourse", Material = Enum.Material.Slate, Color = Color3.fromRGB(24, 28, 40) }, bowl)
+		local backD = rowRadius(LOWER_ROWS + UPPER_ROWS) + ROW_DEPTH
+		arcPart(t1, t2, backD, gy + 24, 1.5, 48, { Name = "OuterWall", Material = Enum.Material.Metal, Color = Color3.fromRGB(20, 24, 36) }, bowl)
+
+		-- LED-Ringe: Unterrang-Front und Oberrang-Front in Cyan/Blau
+		arcPart(t1, t2, -0.6, gy + 3.2, 0.3, 0.6, { Name = "LEDLower", Material = Enum.Material.Neon, Color = CYAN }, led, true)
+		arcPart(t1, t2, LOWER_ROWS * ROW_DEPTH + CONCOURSE - 0.3, gy + 19.5, 0.3, 0.8, { Name = "LEDUpper", Material = Enum.Material.Neon, Color = BLUE }, led, true)
+
+		-- Dach: Platte vom Außenrand zur Innenkante (offen über dem Feld), Innenkante mit Pink-Akzent
+		local inner = ring((t1 + t2) / 2, 20)
+		local outer = ring((t1 + t2) / 2, backD)
+		local roofMid = (inner + outer) / 2 + Vector3.new(0, ROOF_Y - 1.5, 0)
+		local p1, p2 = ring(t1, 20), ring(t2, 20)
+		local q1, q2 = ring(t1, backD), ring(t2, backD)
+		local width = math.max((p2 - p1).Magnitude, (q2 - q1).Magnitude) + 0.4
+		local radial = Vector3.new(outer.X - inner.X, 0, outer.Z - inner.Z)
+		deco({
+			Name = "RoofPanel", Size = Vector3.new(width, 0.6, radial.Magnitude),
+			CFrame = CFrame.lookAt(roofMid, roofMid + radial) * CFrame.Angles(math.rad(-4), 0, 0),
+			Material = Enum.Material.Glass, Transparency = 0.45, Color = Color3.fromRGB(26, 34, 52),
+		}, roof)
+		arcPart(t1, t2, 20, ROOF_Y - 0.6, 1.2, 1.2, { Name = "InnerRing", Material = Enum.Material.Metal, Color = STEEL }, roof, true)
+		arcPart(t1, t2, 19.3, ROOF_Y - 1.6, 0.3, 0.5, { Name = "LEDRoof", Material = Enum.Material.Neon, Color = PINK }, led, true)
+
+		-- Radiale Träger, Stützen und Flutlicht an jedem vierten Segment
+		if i % 4 == 0 then
+			local truss = deco({
+				Name = "RoofTruss", Size = Vector3.new(1.2, 2.4, radial.Magnitude),
+				CFrame = CFrame.lookAt(roofMid + Vector3.new(0, 1.2, 0), roofMid + Vector3.new(0, 1.2, 0) + radial),
+				Material = Enum.Material.Metal, Color = STEEL,
+			}, roof)
+			truss.Name = "RoofTruss"
+			part({ Name = "Column", Size = Vector3.new(2, ROOF_Y - gy, 2), Position = outer + Vector3.new(0, (ROOF_Y + gy) / 2, 0),
+				Material = Enum.Material.Metal, Color = STEEL }, roof)
+			local lampPos = inner + Vector3.new(0, ROOF_Y - 2.6, 0)
+			local lamp = deco({
+				Name = "Floodlight", Size = Vector3.new(5, 1.2, 3),
+				CFrame = CFrame.lookAt(lampPos, Vector3.new(0, gy, 0)),
+				Material = Enum.Material.Neon, Color = Color3.fromRGB(235, 248, 255),
+			}, roof)
+			local light = Instance.new("SpotLight")
+			light.Face = Enum.NormalId.Front
+			light.Brightness = 2.4
+			light.Range = 60
+			light.Angle = 70
+			light.Color = Color3.fromRGB(220, 240, 255)
+			light.Parent = lamp
+		end
+	end
+
+	-- Spielertunnel hinter der Lücke im Unterrang
+	local tunnelMid = ring((12.5 / SEGMENTS) * math.pi * 2, 8)
+	part({ Name = "Tunnel", Size = Vector3.new(14, 9, 18), CFrame = CFrame.lookAt(tunnelMid + Vector3.new(0, gy + 4.5, 0), Vector3.new(0, gy + 4.5, 0)),
+		Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 12, 18) }, bowl)
+	deco({ Name = "TunnelLight", Size = Vector3.new(10, 0.4, 0.4), CFrame = CFrame.lookAt(tunnelMid + Vector3.new(0, gy + 8.6, -2), Vector3.new(0, gy + 8.6, 0)),
+		Material = Enum.Material.Neon, Color = CYAN }, led)
+
+	-- Anzeigetafel über dem Oberrang hinter dem linken Tor, zeigt Spielstand und Zeit aus State
+	local boardPos = Vector3.new(-(INNER_A + 24), gy + 40, 0)
+	local board = part({ Name = "Scoreboard", Size = Vector3.new(2, 16, 44), CFrame = CFrame.lookAt(boardPos, Vector3.new(0, gy + 40, 0)),
+		Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 12, 20) }, dome)
+	local frameGlow = deco({ Name = "ScoreboardFrame", Size = Vector3.new(0.4, 17, 45), CFrame = board.CFrame * CFrame.new(0, 0, -0.9),
+		Material = Enum.Material.Neon, Color = CYAN, Transparency = 0.2 }, led)
+	frameGlow.Name = "ScoreboardFrame"
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 24
+	gui.LightInfluence = 0
+	gui.Brightness = 2
+	gui.Parent = board
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundColor3 = Color3.fromRGB(6, 10, 22)
+	text.RichText = true
+	text.TextScaled = true
+	text.Font = Enum.Font.GothamBlack
+	text.TextColor3 = Color3.new(1, 1, 1)
+	text.Parent = gui
+	local function refresh()
+		local t = state:GetAttribute("TimeLeft") or 0
+		text.Text = string.format('<font color="#ff5a5a">ROT</font> %d : %d <font color="#6fb4ff">BLAU</font>\n<font size="40" color="#28d2ff">SPECTRA DOME  %d:%02d</font>',
+			state:GetAttribute("RedScore") or 0, state:GetAttribute("BlueScore") or 0, t // 60, t % 60)
+	end
+	state.AttributeChanged:Connect(refresh)
+	refresh()
+
+	dome.Parent = root
+	return dome
+end
+
+return Dome
+]==] sd.Parent = s
+local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[-- UltimatePitch v0.4 · Client (HUD, Eingaben, Effekte). Sendet nur Absichten; Ladung, Ausdauer, Tore entscheidet der Server.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local CAS = game:GetService("ContextActionService")
 local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 
 local player = Players.LocalPlayer
 local SHARED = RS:WaitForChild("UltimatePitch")
 local State = SHARED:WaitForChild("State")
 local Kick = SHARED:WaitForChild("Kick")
+local Effect = SHARED:WaitForChild("Effect")
+local AuroraFX = require(script:WaitForChild("AuroraFX"))
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "UltimatePitchHUD"
@@ -840,7 +1177,7 @@ local big = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromSc
 big.TextStrokeTransparency = 1
 label({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12), Size = UDim2.fromOffset(420, 20),
 	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.25,
-	Text = "F / Klick halten = Schuss   ·   E = Pass   ·   Shift = Sprint" })
+	Text = "F / Klick halten = Schuss  ·  E = Pass  ·  Shift = Sprint  ·  R = AURORA BREAK  ·  M = Effekte reduzieren" })
 
 local function fmt(t) return string.format("%d:%02d", t // 60, t % 60) end
 
@@ -873,9 +1210,38 @@ State.AttributeChanged:Connect(function(name)
 end)
 refresh()
 
+local REJECTS = { TooFar = "Zu weit vom Ball!", NoCharge = "Schuss nicht aufgeladen", Cooldown = "AURORA BREAK lädt noch", NoStamina = "Zu wenig Ausdauer" }
 Kick.OnClientEvent:Connect(function(what)
-	if what == "TooFar" then showMsg("Zu weit vom Ball!") end
+	if REJECTS[what] then showMsg(REJECTS[what]) end
 end)
+
+-- Skill-Effekte: Server meldet Anlauf, Kick-Marker-Schuss und Abbruch
+Effect.OnClientEvent:Connect(function(kind, userId, arg)
+	if type(userId) ~= "number" then return end
+	if kind == "AuroraWindup" then AuroraFX.windup(userId, tonumber(arg) or 0.3)
+	elseif kind == "AuroraKick" then AuroraFX.kick(userId, workspace:FindFirstChild("UltimatePitch") and workspace.UltimatePitch:FindFirstChild("Ball"))
+	elseif kind == "AuroraCancel" then AuroraFX.cancel(userId) end
+end)
+
+-- GOAL-Cinematic nur auf das serverbestätigte Tor-Ereignis
+local lastGoalSeq = State:GetAttribute("GoalSeq") or 0
+State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
+	local seq = State:GetAttribute("GoalSeq") or 0
+	if seq > lastGoalSeq then
+		AuroraFX.goal(gui, State:GetAttribute("LastGoalTeam") or "", State:GetAttribute("LastGoalAurora") == true)
+	end
+	lastGoalSeq = seq
+end)
+
+-- Grafikprofil: bei niedriger Qualitätsstufe Zuschauer und Sitzreihen lokal ausblenden (Kollisionen unverändert)
+local function applyProfile()
+	local ok, level = pcall(function() return UserSettings().GameSettings.SavedQualityLevel.Value end)
+	local low = ok and level > 0 and level <= 3
+	for _, p in ipairs(CollectionService:GetTagged("UP_Crowd")) do
+		p.LocalTransparencyModifier = low and 1 or 0
+	end
+end
+task.delay(3, applyProfile)
 
 local RunService = game:GetService("RunService")
 
@@ -900,37 +1266,36 @@ local _, staminaFill = meter(-40, Color3.fromRGB(80, 220, 120))
 local chargeBack, chargeFill = meter(-56, Color3.fromRGB(255, 170, 40))
 chargeBack.Visible = false
 
-local stamina, sprinting = 1, false
+-- Skill-Anzeige: AURORA BREAK bereit / Restsekunden (Cooldown-Ende kommt als Server-Zeitstempel)
+local skill = label({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -72), Size = UDim2.fromOffset(260, 22),
+	TextSize = 15, TextColor3 = Color3.fromRGB(70, 255, 150), Text = "R  AURORA BREAK  bereit" })
+
 local charging, chargeStart = false, 0
-local CHARGE_TIME = 1
+local CHARGE_TIME = 1 -- nur Anzeige; die gültige Ladung misst der Server
 
 local function chargeLevel()
 	return math.clamp((os.clock() - chargeStart) / CHARGE_TIME, 0, 1)
 end
 
-RunService.RenderStepped:Connect(function(dt)
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum then
-		local base = char:GetAttribute("BaseSpeed") or 16
-		local moving = hum.MoveDirection.Magnitude > 0.1
-		local active = sprinting and moving and stamina > 0
-		if active then stamina = math.max(0, stamina - dt / 4) else stamina = math.min(1, stamina + dt / 6) end
-		hum.WalkSpeed = active and base * 1.45 or base
-	end
+RunService.RenderStepped:Connect(function()
+	local stamina = (player:GetAttribute("Stamina") or 100) / 100
 	staminaFill.Size = UDim2.fromScale(stamina, 1)
 	staminaFill.BackgroundColor3 = stamina < 0.25 and Color3.fromRGB(230, 70, 60) or Color3.fromRGB(80, 220, 120)
 	if charging then chargeFill.Size = UDim2.fromScale(chargeLevel(), 1) end
+	local left = (player:GetAttribute("AuroraReady") or 0) - workspace:GetServerTimeNow()
+	skill.Text = left > 0 and string.format("R  AURORA BREAK  %ds", math.ceil(left)) or "R  AURORA BREAK  bereit"
+	skill.TextColor3 = left > 0 and Color3.fromRGB(150, 160, 175) or Color3.fromRGB(70, 255, 150)
 end)
 
 local function shot(_, st)
 	if st == Enum.UserInputState.Begin then
 		charging, chargeStart = true, os.clock()
 		chargeBack.Visible = true
+		Kick:FireServer("ChargeStart")
 	elseif st == Enum.UserInputState.End and charging then
 		charging = false
 		chargeBack.Visible = false
-		Kick:FireServer("Shot", chargeLevel())
+		Kick:FireServer("Shot")
 	end
 	return Enum.ContextActionResult.Pass
 end
@@ -938,11 +1303,25 @@ CAS:BindAction("UP_Shot", shot, true, Enum.KeyCode.F, Enum.UserInputType.MouseBu
 CAS:SetTitle("UP_Shot", "Schuss")
 
 CAS:BindAction("UP_Sprint", function(_, st)
-	if st == Enum.UserInputState.Begin then sprinting = true
-	elseif st == Enum.UserInputState.End or st == Enum.UserInputState.Cancel then sprinting = false end
+	if st == Enum.UserInputState.Begin then Kick:FireServer("Sprint", true)
+	elseif st == Enum.UserInputState.End or st == Enum.UserInputState.Cancel then Kick:FireServer("Sprint", false) end
 	return Enum.ContextActionResult.Pass
 end, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3)
 CAS:SetTitle("UP_Sprint", "Sprint")
+
+CAS:BindAction("UP_Aurora", function(_, st)
+	if st == Enum.UserInputState.Begin then Kick:FireServer("Aurora") end
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
+CAS:SetTitle("UP_Aurora", "AURORA")
+
+CAS:BindAction("UP_ReducedMotion", function(_, st)
+	if st == Enum.UserInputState.Begin then
+		AuroraFX.reducedMotion = not AuroraFX.reducedMotion
+		showMsg(AuroraFX.reducedMotion and "Effekte reduziert" or "Effekte voll")
+	end
+	return Enum.ContextActionResult.Pass
+end, false, Enum.KeyCode.M)
 
 CAS:BindAction("UP_Pass", function(_, st)
 	if st == Enum.UserInputState.Begin then Kick:FireServer("Pass") end
@@ -953,6 +1332,282 @@ CAS:SetTitle("UP_Pass", "Pass")
 CAS:SetPosition("UP_Shot", UDim2.new(0.15, 0, 0.05, 0))
 CAS:SetPosition("UP_Pass", UDim2.new(-0.25, 0, 0.45, 0))
 CAS:SetPosition("UP_Sprint", UDim2.new(-0.25, 0, 0.0, 0))
-]==] c.Parent = SPS
+CAS:SetPosition("UP_Aurora", UDim2.new(0.15, 0, 0.5, 0))
+]==]
+local ca = Instance.new("ModuleScript") ca.Name = "AuroraFX" ca.Source = [==[-- UltimatePitch · AURORA BREAK Darstellung (ModuleScript unter UltimatePitchClient)
+-- Reine Optik: reagiert auf Server-Ereignisse (AuroraWindup/AuroraKick/AuroraCancel, GoalSeq) und entscheidet nichts.
+-- Kickanimation prozedural über R15-Motor6D.Transform (keine hochgeladene Animation), Kick-Marker bei Anlaufende.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local Lighting = game:GetService("Lighting")
+
+local AuroraFX = {}
+AuroraFX.reducedMotion = false
+AuroraFX.markers = {} -- Testmesswerte: Zeitpunkte von Anlauf, Kick-Marker und Server-Kick je Schütze
+
+local GREEN = Color3.fromRGB(70, 255, 150)
+local CYAN = Color3.fromRGB(40, 220, 255)
+local GOLD = Color3.fromRGB(255, 200, 60)
+local WHITE = Color3.fromRGB(245, 255, 250)
+
+local fxFolder = Instance.new("Folder")
+fxFolder.Name = "UP_LocalFX"
+fxFolder.Parent = workspace
+
+local function fxPart(props, life)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.Neon
+	for k, v in pairs(props) do p[k] = v end
+	p.Parent = fxFolder
+	Debris:AddItem(p, life)
+	return p
+end
+
+-- Posen als Winkel (rad) je Gelenk; Zeit relativ zum Kick-Marker (0 = Ballkontakt)
+local POSES = {
+	{ t = -0.30, hip = 0, knee = 0, waist = 0, lsh = 0, rsh = 0 },
+	{ t = -0.10, hip = 0.95, knee = -1.25, waist = 0.35, lsh = -0.9, rsh = 0.7 },   -- Ausholen
+	{ t = 0.00, hip = -1.35, knee = -0.15, waist = -0.25, lsh = 0.5, rsh = -0.6 },  -- Kontakt (Marker "Kick")
+	{ t = 0.12, hip = -1.6, knee = 0, waist = -0.35, lsh = 0.7, rsh = -0.8 },       -- Durchschwung
+	{ t = 0.45, hip = 0, knee = 0, waist = 0, lsh = 0, rsh = 0 },                   -- Ausschwingen
+}
+
+local function sample(t)
+	if t <= POSES[1].t then return POSES[1] end
+	for i = 1, #POSES - 1 do
+		local a, b = POSES[i], POSES[i + 1]
+		if t <= b.t then
+			local u = (t - a.t) / (b.t - a.t)
+			u = u * u * (3 - 2 * u)
+			local out = {}
+			for k, v in pairs(a) do out[k] = v + (b[k] - v) * u end
+			return out
+		end
+	end
+	return POSES[#POSES]
+end
+
+local function motor(char, partName, motorName)
+	local p = char:FindFirstChild(partName)
+	return p and p:FindFirstChild(motorName)
+end
+
+-- Prozedurale R15-Kickanimation; meldet den Kick-Marker über onMarker
+local function playKick(char, windup, onMarker)
+	local joints = {
+		hip = motor(char, "RightUpperLeg", "RightHip"),
+		knee = motor(char, "RightLowerLeg", "RightKnee"),
+		waist = motor(char, "UpperTorso", "Waist"),
+		lsh = motor(char, "LeftUpperArm", "LeftShoulder"),
+		rsh = motor(char, "RightUpperArm", "RightShoulder"),
+	}
+	if not joints.hip then return end
+	local start = os.clock()
+	local fired = false
+	local conn
+	conn = RunService.Stepped:Connect(function()
+		local t = os.clock() - start - windup
+		if not char.Parent then conn:Disconnect() return end
+		local pose = sample(t)
+		if joints.hip then joints.hip.Transform = CFrame.Angles(pose.hip, 0, 0) end
+		if joints.knee then joints.knee.Transform = CFrame.Angles(pose.knee, 0, 0) end
+		if joints.waist then joints.waist.Transform = CFrame.Angles(0, pose.waist, 0) end
+		if joints.lsh then joints.lsh.Transform = CFrame.Angles(0, 0, pose.lsh) end
+		if joints.rsh then joints.rsh.Transform = CFrame.Angles(0, 0, pose.rsh) end
+		if not fired and t >= 0 then
+			fired = true
+			onMarker("Kick")
+		end
+		if t > POSES[#POSES].t then conn:Disconnect() end
+	end)
+end
+
+local function ringBurst(pos, color, delay, size, life)
+	task.delay(delay, function()
+		local ring = fxPart({ Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 2, 2), Color = color, Transparency = 0.2,
+			CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90)) }, life + 0.1)
+		TweenService:Create(ring, TweenInfo.new(life, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{ Size = Vector3.new(0.2, size, size), Transparency = 1 }):Play()
+	end)
+end
+
+local function flash(root, color, brightness, life)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 18
+	light.Brightness = brightness
+	light.Parent = root
+	TweenService:Create(light, TweenInfo.new(life), { Brightness = 0 }):Play()
+	Debris:AddItem(light, life + 0.05)
+end
+
+local function cameraPush(amount)
+	local cam = workspace.CurrentCamera
+	if AuroraFX.reducedMotion or not cam then return end
+	local base = 70
+	TweenService:Create(cam, TweenInfo.new(0.1, Enum.EasingStyle.Quad), { FieldOfView = base + amount }):Play()
+	task.delay(0.16, function()
+		TweenService:Create(cam, TweenInfo.new(0.45, Enum.EasingStyle.Quad), { FieldOfView = base }):Play()
+	end)
+end
+
+local function charOf(userId)
+	local plr = Players:GetPlayerByUserId(userId)
+	return plr and plr.Character, plr
+end
+
+-- Anlauf: Animation + gestaffelte Ringe; volle Effektmenge nur für den eigenen Schützen (FX-Budget)
+function AuroraFX.windup(userId, windup)
+	local char, plr = charOf(userId)
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local own = plr == Players.LocalPlayer
+	AuroraFX.markers[userId] = { windupAt = os.clock() }
+	local feet = root.Position - Vector3.new(0, 2.8, 0)
+	ringBurst(feet, GREEN, 0, 14, 0.4)
+	ringBurst(feet, CYAN, 0.08, 18, 0.4)
+	if own then ringBurst(feet, GOLD, 0.16, 22, 0.45) end
+	flash(root, GREEN, own and 5 or 2.5, windup + 0.2)
+	playKick(char, windup, function(name)
+		local m = AuroraFX.markers[userId]
+		if not m then return end
+		m.markerAt = os.clock()
+		m.marker = name
+		-- Messwert für Tests (lokal, nicht repliziert): Abstand Anlaufbeginn -> Kick-Marker
+		if own then Players.LocalPlayer:SetAttribute("AuroraMarkerDelay", m.markerAt - m.windupAt) end
+	end)
+end
+
+-- Server hat am Kick-Marker geschossen: Ball-Kern, Spur, Streifen, Bodenimpuls, Kamera
+function AuroraFX.kick(userId, ball)
+	local char, plr = charOf(userId)
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local own = plr == Players.LocalPlayer
+	local m = AuroraFX.markers[userId]
+	if m then
+		m.kickAt = os.clock()
+		-- Messwert für Tests: Abstand Anlaufbeginn -> serverbestätigter Schuss
+		if own then Players.LocalPlayer:SetAttribute("AuroraKickDelay", m.kickAt - m.windupAt) end
+	end
+	if not ball then return end
+	local life = 1.1
+	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(3.4, 3.4, 3.4), Color = WHITE, Transparency = 0.25,
+		CFrame = ball.CFrame }, life + 0.1)
+	local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0, 0.9, 0); a0.Parent = core
+	local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(0, -0.9, 0); a1.Parent = core
+	local trail = Instance.new("Trail")
+	trail.Attachment0, trail.Attachment1 = a0, a1
+	trail.Lifetime = 0.35
+	trail.LightEmission = 1
+	trail.Color = ColorSequence.new(GREEN, CYAN)
+	trail.Transparency = NumberSequence.new(0.1, 1)
+	trail.Parent = core
+	local glow = Instance.new("PointLight"); glow.Color = GREEN; glow.Range = 16; glow.Brightness = 3; glow.Parent = core
+	TweenService:Create(core, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(1.6, 1.6, 1.6), Transparency = 0.8 }):Play()
+	local follow
+	follow = RunService.RenderStepped:Connect(function()
+		if not core.Parent or not ball.Parent then follow:Disconnect() return end
+		core.CFrame = ball.CFrame
+	end)
+	task.delay(life, function() if follow.Connected then follow:Disconnect() end end)
+
+	local origin = root and root.Position or ball.Position
+	local forward = root and Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit or Vector3.new(1, 0, 0)
+	ringBurst(origin - Vector3.new(0, 2.8, 0), WHITE, 0, own and 26 or 16, 0.35)
+	local streaks = own and 10 or 4
+	for i = 1, streaks do
+		local angle = (i / streaks) * math.pi * 2
+		local dir = (CFrame.fromAxisAngle(Vector3.yAxis, angle) * forward)
+		local s = fxPart({ Size = Vector3.new(0.25, 0.25, 6), Color = i % 2 == 0 and GREEN or WHITE, Transparency = 0.1,
+			CFrame = CFrame.lookAt(origin + dir * 3, origin + dir * 9) }, 0.4)
+		TweenService:Create(s, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = CFrame.lookAt(origin + dir * 14, origin + dir * 22), Transparency = 1 }):Play()
+	end
+	if own then cameraPush(14) elseif root and workspace.CurrentCamera
+		and (workspace.CurrentCamera.CFrame.Position - root.Position).Magnitude < 60 then cameraPush(5) end
+end
+
+function AuroraFX.cancel(userId)
+	AuroraFX.markers[userId] = nil
+end
+
+-- GOAL-Cinematic: nur auf das serverbestätigte Tor-Ereignis (GoalSeq), nie bei Fehlschüssen
+function AuroraFX.goal(gui, team, aurora)
+	-- Banner in Bildmitte (Torpause, kein laufendes Spiel): großer goldener Titel + Untertitel
+	local banner = Instance.new("Frame")
+	banner.Name = "GoalBanner"
+	banner.AnchorPoint = Vector2.new(0.5, 0.5)
+	banner.Position = UDim2.fromScale(0.5, 0.55)
+	banner.Size = UDim2.fromOffset(640, 190)
+	banner.BackgroundTransparency = 1
+	banner.Rotation = -4
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 140)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBlack
+	title.TextScaled = true
+	title.Text = "GOAL!"
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.Parent = banner
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new(Color3.fromRGB(255, 244, 170), GOLD)
+	gradient.Rotation = 90
+	gradient.Parent = title
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(90, 50, 0)
+	stroke.Thickness = 5
+	stroke.Parent = title
+	local sub = Instance.new("TextLabel")
+	sub.Position = UDim2.fromOffset(0, 140)
+	sub.Size = UDim2.new(1, 0, 0, 44)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.GothamBlack
+	sub.TextScaled = true
+	sub.Text = (aurora and "AURORA BREAK  ·  " or "") .. string.upper(team)
+	sub.TextColor3 = aurora and Color3.fromRGB(150, 255, 200) or Color3.new(1, 1, 1)
+	sub.TextStrokeTransparency = 0.2
+	sub.Parent = banner
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.4
+	scale.Parent = banner
+	banner.Parent = gui
+	TweenService:Create(scale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(1.3, function()
+		TweenService:Create(title, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+		TweenService:Create(stroke, TweenInfo.new(0.3), { Transparency = 1 }):Play()
+		TweenService:Create(sub, TweenInfo.new(0.3), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	end)
+	Debris:AddItem(banner, 1.7)
+	if AuroraFX.reducedMotion then return end
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Name = "UP_GoalGrade"
+	cc.Saturation = aurora and -0.75 or -0.4
+	cc.Contrast = 0.15
+	cc.Parent = Lighting
+	TweenService:Create(cc, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Saturation = 0, Contrast = 0 }):Play()
+	Debris:AddItem(cc, 1.1)
+	if aurora then
+		local white = Instance.new("Frame")
+		white.Size = UDim2.fromScale(1, 1)
+		white.BackgroundColor3 = WHITE
+		white.BackgroundTransparency = 0.55
+		white.ZIndex = 0
+		white.Parent = gui
+		TweenService:Create(white, TweenInfo.new(0.35), { BackgroundTransparency = 1 }):Play()
+		Debris:AddItem(white, 0.4)
+	end
+end
+
+return AuroraFX
+]==] ca.Parent = c
+s.Parent = SSS
+c.Parent = SPS
 game:GetService("ChangeHistoryService"):SetWaypoint("UltimatePitch v0.4")
 print("✅ UltimatePitch v0.4 installiert – Spielen drücken!")
