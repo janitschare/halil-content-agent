@@ -681,9 +681,37 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, power)
 	end
 end)
 
+local function humansIn(teamName)
+	local n = 0
+	for _, e in pairs(roster[teamName]) do
+		if e.kind == "player" then n += 1 end
+	end
+	return n
+end
+
+-- Spät beigetreten: Feldspieler-Bot des Teams mit weniger Menschen übernehmen
+local function joinRunningMatch(plr)
+	local first = humansIn("Rot") <= humansIn("Blau") and "Rot" or "Blau"
+	for _, teamName in ipairs({ first, first == "Rot" and "Blau" or "Rot" }) do
+		for slot = 2, #SLOTS do
+			local e = roster[teamName][slot]
+			if e and e.kind == "bot" then
+				if e.model then e.model:Destroy() end
+				roster[teamName][slot] = { kind = "player", player = plr }
+				plr.Team = TEAM[teamName].team
+				msg(plr.DisplayName .. " wechselt ein (" .. teamName .. ")")
+				return teamName, slot
+			end
+		end
+	end
+end
+
 local function onCharacter(plr)
 	task.wait(0.2)
 	local teamName, slot = findPlayerSlot(plr)
+	if not teamName and (inMatch() or phase == "Goal") then
+		teamName, slot = joinRunningMatch(plr)
+	end
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
 		placePlayer(plr, teamName, slot)
 	elseif plr.Character then

@@ -1,9 +1,12 @@
 -- UltimatePitch Test-Harness (Server). Nur aktiv in StudioTestService-Laeufen mit Args "UP_MP2"
--- oder wenn Workspace-Attribut UP_RunMP gesetzt ist (Studio-Testmodus "Server + 2 Spieler").
+-- oder wenn Workspace-Attribut UP_RunMP gesetzt ist (Studio-Testmodus "Server & Clients").
 -- Nicht Teil von build.py: bei Bedarf nach ServerScriptService kopieren.
+-- Sitzung bleibt offen: Bericht per MCP lesen (ReplicatedStorage.UP_Test@Report),
+-- danach StudioTestService:EndTest(report) auf dem Server aufrufen.
 local STS = game:GetService("StudioTestService")
 local ok, args = pcall(function() return STS:GetTestArgs() end)
-if not ((ok and args == "UP_MP2") or workspace:GetAttribute("UP_RunMP")) then return end
+local viaSTS = ok and args == "UP_MP2"
+if not (viaSTS or workspace:GetAttribute("UP_RunMP")) then return end
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -18,8 +21,6 @@ local function log(s)
 end
 local function finish()
 	folder:SetAttribute("Done", true)
-	-- Im Studio-UI-Modus offen lassen, damit der Bericht per MCP gelesen werden kann
-	if not workspace:GetAttribute("UP_RunMP") then STS:EndTest(table.concat(lines, "\n")) end
 end
 local function waitFor(cond, timeout)
 	local t0 = os.clock()
@@ -30,19 +31,32 @@ local function waitFor(cond, timeout)
 	return true
 end
 
-local clientReports = {}
+-- Clients melden "ready", sobald ihr Harness laeuft (Test-Clients laden teils >90 s)
+local clientReports, ready = {}, {}
 reportEv.OnServerEvent:Connect(function(plr, key, val)
+	if key == "ready" then ready[plr] = true end
 	clientReports[plr.Name .. ":" .. tostring(key)] = val
 end)
-
-if not waitFor(function() return #Players:GetPlayers() >= 2 end, 180) then
-	log("FAIL nur " .. #Players:GetPlayers() .. " Spieler"); return finish()
+local function allReady()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if not ready[p] then return false end
+	end
+	return true
 end
-log("Spieler verbunden: " .. #Players:GetPlayers())
-task.wait(5) -- Client-Skripte fertig laden lassen
+
+if not waitFor(function() return #Players:GetPlayers() >= 2 and allReady() end, 240) then
+	log("FAIL Clients nicht bereit, Spieler=" .. #Players:GetPlayers()); return finish()
+end
+log("Spieler verbunden und bereit: " .. #Players:GetPlayers())
+-- Test-Clients haengen kurz nach dem Beitritt oft >15 s in CoreScripts: Zeit zum Beruhigen geben
+task.wait(20)
+
+-- Frisches Match abwarten, damit alle Schritte in dieselbe Spielzeit passen
 local State = RS:WaitForChild("UltimatePitch"):WaitForChild("State")
-if not waitFor(function() return State:GetAttribute("Phase") == "Playing" end, 40) then
-	log("FAIL Phase=" .. tostring(State:GetAttribute("Phase"))); return finish()
+if not waitFor(function()
+	return State:GetAttribute("Phase") == "Playing" and (State:GetAttribute("TimeLeft") or 0) >= 150
+end, 400) then
+	log("FAIL kein frisches Match, Phase=" .. tostring(State:GetAttribute("Phase"))); return finish()
 end
 task.wait(1.5)
 local Bots = workspace.UltimatePitch.Bots
@@ -58,20 +72,25 @@ end
 log(teams[1] ~= teams[2] and "OK Spieler in verschiedenen Teams" or "FAIL Spieler im selben Team")
 log(#Bots:GetChildren() == 8 and "OK 8 Bots fuellen auf 5v5 auf" or "FAIL Botzahl " .. #Bots:GetChildren())
 
--- Ball-Replikation + HUD je Client
+-- Ball-Replikation bei ruhendem Ball + HUD je Client
+Ball.Anchored = true
+Ball.CFrame = CFrame.new(5, 2.1, 10)
+task.wait(1)
 folder:SetAttribute("Step", "ball")
 waitFor(function()
 	return clientReports[plist[1].Name .. ":ball"] and clientReports[plist[2].Name .. ":ball"]
-end, 10)
+end, 30)
 for _, p in ipairs(plist) do
 	local cp = clientReports[p.Name .. ":ball"]
 	if cp then
-		log(("Ball %s: Abweichung Client/Server %.2f Studs"):format(p.Name, (cp - Ball.Position).Magnitude))
+		local dev = (cp - Ball.Position).Magnitude
+		log(("%s Ball %s: Abweichung Client/Server %.2f Studs"):format(dev < 0.5 and "OK" or "FAIL", p.Name, dev))
 	else
 		log("FAIL kein Ball-Report von " .. p.Name)
 	end
 	log("HUD " .. p.Name .. ": " .. tostring(clientReports[p.Name .. ":hud"]))
 end
+Ball.Anchored = false
 
 -- Echter Schuss je Client (LocalScript feuert das RemoteEvent)
 for i, p in ipairs(plist) do
@@ -85,10 +104,39 @@ for i, p in ipairs(plist) do
 	end)
 	folder:SetAttribute("Kicker", p.Name)
 	folder:SetAttribute("Step", "kick" .. i)
-	waitFor(function() return res ~= nil end, 5)
+	waitFor(function() return res ~= nil end, 20)
 	conn:Disconnect()
 	log((res and res > 40) and ("OK Schuss " .. p.Name .. " v=" .. math.floor(res)) or ("FAIL Schuss " .. p.Name .. " v=" .. tostring(res)))
 	task.wait(0.5)
+end
+
+-- Spaet beitreten: dritter Spieler mitten im Match (nur ueber StudioTestService moeglich)
+if viaSTS then
+	local before = {}
+	for _, p in ipairs(Players:GetPlayers()) do before[p] = true end
+	local botsBefore = #Bots:GetChildren()
+	local okAdd, err = pcall(function() STS:AddPlayers(1) end)
+	if not okAdd then
+		log("FAIL AddPlayers: " .. tostring(err))
+	else
+		local newP
+		waitFor(function()
+			for _, p in ipairs(Players:GetPlayers()) do
+				if not before[p] then newP = p end
+			end
+			return newP ~= nil and newP.Character ~= nil
+		end, 240)
+		task.wait(2)
+		if not newP then
+			log("FAIL kein dritter Spieler beigetreten")
+		else
+			local tn = newP.Team and newP.Team.Name or "nil"
+			log(("Spaeter Spieler %s: Team=%s, Phase=%s, Bots %d -> %d"):format(newP.Name, tn,
+				tostring(State:GetAttribute("Phase")), botsBefore, #Bots:GetChildren()))
+			log(((tn == "Rot" or tn == "Blau") and #Bots:GetChildren() == botsBefore - 1)
+				and "OK spaeter Spieler ersetzt Feldspieler-Bot" or "FAIL spaeter Spieler nicht eingewechselt")
+		end
+	end
 end
 
 -- Disconnect mitten im Match -> Bot ersetzt Spieler

@@ -33,3 +33,4 @@ folder:GetAttributeChangedSignal("Step"):Connect(function()
 		if STS:CanLeaveTest() then STS:LeaveTest() end
 	end
 end)
+report:FireServer("ready", true)
