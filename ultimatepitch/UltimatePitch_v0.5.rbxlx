@@ -2152,7 +2152,9 @@ local SPRINT_SPEED = 20.5 -- über Gehtempo 18 (Sprint 26), Bots laufen 17-19
 local CELEBRATE_TIME, RECEIVE_TIME = 2.4, 0.3
 local TOUCH_CYCLE, TOUCH_WINDOW = 0.5, 0.16
 function AuroraFX.startMotion(State)
-	local celebrate, receive = {}, {}
+	-- Schwache Schlüssel: entfernte/respawnte Figuren dürfen nicht in den Tabellen hängen bleiben
+	local celebrate = setmetatable({}, { __mode = "k" })
+	local receive = setmetatable({}, { __mode = "k" })
 	local jointCache = setmetatable({}, { __mode = "k" })
 	local touched = setmetatable({}, { __mode = "k" }) -- im letzten Frame überschriebene Gelenke je Figur
 	local function jointsOf(char)
@@ -2163,7 +2165,8 @@ function AuroraFX.startMotion(State)
 				waist = joint(char, "UpperTorso", "Waist"),
 				lsh = joint(char, "LeftUpperArm", "LeftShoulder"), rsh = joint(char, "RightUpperArm", "RightShoulder"),
 			}
-			jointCache[char] = j
+			-- nur vollständig gefundene Gelenke dauerhaft merken (beim Spawn fehlen sie evtl. noch kurz)
+			if j.hip and j.knee and j.waist and j.lsh and j.rsh then jointCache[char] = j end
 		end
 		return j
 	end
