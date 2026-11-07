@@ -260,7 +260,7 @@ local CFG = {
 	-- Server-Autorität (eigene Testwerte): Schussladung wird serverseitig gemessen, Ausdauer serverseitig geführt
 	ChargeTime = 1, ChargeMaxHold = 4,
 	StaminaMax = 100, SprintDrain = 25, StaminaRegen = 16, SprintMinStamina = 5,
-	MoveSlack = 6, MoveSample = 0.25,
+	MoveBurst = 12, -- Streckenbudget (Studs) für Netzwerk-Schübe, siehe Bewegungsprüfung
 	-- AURORA BREAK (Elite-Abschluss, eigene Testwerte)
 	AuroraRange = 6, AuroraCooldown = 12, AuroraStamina = 30, AuroraWindup = 0.3,
 	AuroraSpeed = 128, AuroraLift = 9, AuroraGoalWindow = 2,
@@ -296,7 +296,7 @@ local function teleport(plr, cf)
 	local char = plr.Character
 	if not char then return end
 	char:PivotTo(cf)
-	motion[plr] = { pos = cf.Position, t = os.clock() }
+	motion[plr] = { pos = cf.Position, budget = CFG.MoveBurst }
 end
 
 local function flat(vec) return Vector3.new(vec.X, 0, vec.Z) end
@@ -880,20 +880,23 @@ RunService.Heartbeat:Connect(function(dt)
 			local rounded = math.floor(value + 0.5)
 			if plr:GetAttribute("Stamina") ~= rounded then plr:SetAttribute("Stamina", rounded) end
 
-			-- Bewegung: horizontale Strecke seit der letzten Stichprobe darf das erlaubte Sprinttempo nicht übersteigen
+			-- Bewegung: Streckenbudget. Es füllt sich mit dem gerade erlaubten Tempo (Gehen oder Sprint, +20 %)
+			-- und ist auf MoveBurst gedeckelt (Netzwerk-Schübe, Sprint-Ende mit Verzögerung). Jede zurückgelegte
+			-- horizontale Strecke wird abgezogen; fällt das Budget unter 0, setzt der Server auf die letzte
+			-- akzeptierte Position zurück. So wird auch ein dauerhaft nur leicht erhöhtes Tempo erkannt.
 			local m = motion[plr]
 			if not m then
-				motion[plr] = { pos = root.Position, t = now }
+				motion[plr] = { pos = root.Position, budget = CFG.MoveBurst }
 			else
-				local elapsed = now - m.t
 				local delta = flat(root.Position - m.pos).Magnitude
-				local allowed = base * CFG.SprintFactor * 1.15 * elapsed + CFG.MoveSlack
-				if delta > allowed then
+				local rate = speed * 1.2
+				m.budget = math.min(CFG.MoveBurst, m.budget + rate * dt) - delta
+				if m.budget < 0 then
 					char:PivotTo(CFrame.new(m.pos) * root.CFrame.Rotation)
-					m.t = now
+					m.budget = 0
 					plr:SetAttribute("MoveCorrections", (plr:GetAttribute("MoveCorrections") or 0) + 1)
-				elseif elapsed >= CFG.MoveSample then
-					m.pos, m.t = root.Position, now
+				else
+					m.pos = root.Position
 				end
 			end
 		end

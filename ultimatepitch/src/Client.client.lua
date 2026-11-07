@@ -43,9 +43,25 @@ local info = label({ Parent = bar, Size = UDim2.new(1, 0, 0, 20), Position = UDi
 local big = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.32), Size = UDim2.fromOffset(700, 70),
 	TextSize = 44, Font = Enum.Font.GothamBlack, TextStrokeTransparency = 0.3, TextTransparency = 1 })
 big.TextStrokeTransparency = 1
-label({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12), Size = UDim2.fromOffset(420, 20),
-	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.25,
-	Text = "F / Klick halten = Schuss  ·  E = Pass  ·  Shift = Sprint  ·  R = AURORA BREAK  ·  M = Effekte reduzieren" })
+local UIS = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local touchOnly = UIS.TouchEnabled and not UIS.KeyboardEnabled
+label({ AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12), Size = UDim2.new(1, -24, 0, 20),
+	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.25, TextTruncate = Enum.TextTruncate.AtEnd,
+	Text = touchOnly and "Schuss halten = aufladen  ·  Pass  ·  Sprint halten  ·  AURORA  ·  FX = Effekte reduzieren"
+		or "F / Klick halten = Schuss  ·  E = Pass  ·  Shift = Sprint  ·  R = AURORA BREAK  ·  M = Effekte reduzieren" })
+
+-- Reduzierte Bewegung: Systemeinstellung des Spielers als Vorgabe übernehmen (M bzw. FX-Knopf schaltet um)
+local function systemReducedMotion()
+	local ok, on = pcall(function() return GuiService.ReducedMotionEnabled end)
+	return ok and on == true
+end
+AuroraFX.reducedMotion = systemReducedMotion()
+pcall(function()
+	GuiService:GetPropertyChangedSignal("ReducedMotionEnabled"):Connect(function()
+		AuroraFX.reducedMotion = systemReducedMotion()
+	end)
+end)
 
 local function fmt(t) return string.format("%d:%02d", t // 60, t % 60) end
 
@@ -183,13 +199,36 @@ CAS:BindAction("UP_Aurora", function(_, st)
 end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
 CAS:SetTitle("UP_Aurora", "AURORA")
 
+local function toggleReducedMotion()
+	AuroraFX.reducedMotion = not AuroraFX.reducedMotion
+	showMsg(AuroraFX.reducedMotion and "Effekte reduziert" or "Effekte voll")
+end
 CAS:BindAction("UP_ReducedMotion", function(_, st)
-	if st == Enum.UserInputState.Begin then
-		AuroraFX.reducedMotion = not AuroraFX.reducedMotion
-		showMsg(AuroraFX.reducedMotion and "Effekte reduziert" or "Effekte voll")
-	end
+	if st == Enum.UserInputState.Begin then toggleReducedMotion() end
 	return Enum.ContextActionResult.Pass
 end, false, Enum.KeyCode.M)
+
+-- Touch-Geräte haben keine M-Taste: kleiner FX-Schalter oben rechts
+if UIS.TouchEnabled then
+	local fx = Instance.new("TextButton")
+	fx.Name = "UP_FXToggle"
+	fx.AnchorPoint = Vector2.new(1, 0)
+	fx.Position = UDim2.new(1, -10, 0, 8)
+	fx.Size = UDim2.fromOffset(56, 36)
+	fx.BackgroundColor3 = Color3.fromRGB(15, 18, 24)
+	fx.BackgroundTransparency = 0.2
+	fx.Font = Enum.Font.GothamBold
+	fx.TextSize = 15
+	fx.TextColor3 = Color3.new(1, 1, 1)
+	fx.Text = "FX"
+	Instance.new("UICorner", fx).CornerRadius = UDim.new(0, 10)
+	fx.Parent = gui
+	fx.Activated:Connect(function()
+		toggleReducedMotion()
+		fx.Text = AuroraFX.reducedMotion and "FX–" or "FX"
+	end)
+	fx.Text = AuroraFX.reducedMotion and "FX–" or "FX"
+end
 
 CAS:BindAction("UP_Pass", function(_, st)
 	if st == Enum.UserInputState.Begin then Kick:FireServer("Pass") end
