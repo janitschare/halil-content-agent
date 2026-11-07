@@ -852,6 +852,14 @@ local function runMatch()
 			State:SetAttribute("LastGoalTeam", t)
 			State:SetAttribute("LastGoalAurora", pendingGoalAurora)
 			State:SetAttribute("GoalSeq", (State:GetAttribute("GoalSeq") or 0) + 1)
+			-- Torjubel: Bots des Torteams springen zweimal (Armbewegung zeigen die Clients, siehe AuroraFX.startMotion)
+			for _, e in pairs(roster[t]) do
+				local hum = e.kind == "bot" and e.model and e.model.Parent and e.model:FindFirstChildOfClass("Humanoid")
+				if hum then
+					hum.Jump = true
+					task.delay(0.9, function() if hum.Parent then hum.Jump = true end end)
+				end
+			end
 			pendingGoalAurora = false
 			setPhase("Goal")
 			if golden then

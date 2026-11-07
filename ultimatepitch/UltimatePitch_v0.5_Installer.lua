@@ -881,6 +881,14 @@ local function runMatch()
 			State:SetAttribute("LastGoalTeam", t)
 			State:SetAttribute("LastGoalAurora", pendingGoalAurora)
 			State:SetAttribute("GoalSeq", (State:GetAttribute("GoalSeq") or 0) + 1)
+			-- Torjubel: Bots des Torteams springen zweimal (Armbewegung zeigen die Clients, siehe AuroraFX.startMotion)
+			for _, e in pairs(roster[t]) do
+				local hum = e.kind == "bot" and e.model and e.model.Parent and e.model:FindFirstChildOfClass("Humanoid")
+				if hum then
+					hum.Jump = true
+					task.delay(0.9, function() if hum.Parent then hum.Jump = true end end)
+				end
+			end
 			pendingGoalAurora = false
 			setPhase("Goal")
 			if golden then
@@ -1768,6 +1776,9 @@ end
 player.CharacterAdded:Connect(markOwn)
 if player.Character then task.spawn(markOwn, player.Character) end
 
+-- R15-Bewegungsebene (Sprint, Ballkontakte, Annahme, Torjubel) – nur Darstellung
+AuroraFX.startMotion(State)
+
 ---------------------------------------------------------------- Ballbesitz: Leuchtring unter dem Spieler am Ball
 -- Rein optisch; den Besitz bestimmt der Server (State@BallOwner = UserId, 0 = frei)
 local RING_SEGMENTS, RING_RADIUS = 16, 2.5
@@ -2155,6 +2166,127 @@ local function playKick(char, windup, onMarker, ball)
 	return joints.hip ~= nil
 end
 AuroraFX.playKick = playKick
+
+-- Prozedurale R15-Bewegungsebene (rein optisch, je Client): Sprint-Vorlage, Ballkontakte beim Dribbeln,
+-- Annahme-Pose bei Besitzwechsel, Torjubel des Torteams. Schreibt absolute Gelenk-Transforms in
+-- PreSimulation (wie die Kickpose) und nur, solange ein Effekt aktiv ist; eine laufende Kickpose hat Vorrang.
+-- Vorzeichen in Studio gemessen: Hüfte/Schulter +X = nach vorn, rechte Schulter +Z / linke −Z = seitlich hoch.
+local MOTION_RANGE = 150 -- Studs zur Kamera; weiter entfernte Figuren bleiben bei der Standardanimation
+local SPRINT_SPEED = 20.5 -- über Gehtempo 18 (Sprint 26), Bots laufen 17-19
+local CELEBRATE_TIME, RECEIVE_TIME = 2.4, 0.3
+local TOUCH_CYCLE, TOUCH_WINDOW = 0.5, 0.16
+function AuroraFX.startMotion(State)
+	local celebrate, receive = {}, {}
+	local jointCache = setmetatable({}, { __mode = "k" })
+	local touched = setmetatable({}, { __mode = "k" }) -- im letzten Frame überschriebene Gelenke je Figur
+	local function jointsOf(char)
+		local j = jointCache[char]
+		if not j then
+			j = {
+				hip = joint(char, "RightUpperLeg", "RightHip"), knee = joint(char, "RightLowerLeg", "RightKnee"),
+				waist = joint(char, "UpperTorso", "Waist"),
+				lsh = joint(char, "LeftUpperArm", "LeftShoulder"), rsh = joint(char, "RightUpperArm", "RightShoulder"),
+			}
+			jointCache[char] = j
+		end
+		return j
+	end
+	local function characters()
+		local list = {}
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr.Character then table.insert(list, plr.Character) end
+		end
+		local root = workspace:FindFirstChild("UltimatePitch")
+		local bots = root and root:FindFirstChild("Bots")
+		if bots then
+			for _, b in ipairs(bots:GetChildren()) do table.insert(list, b) end
+		end
+		return list
+	end
+	State:GetAttributeChangedSignal("BallOwner"):Connect(function()
+		local plr = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
+		if plr and plr.Character then receive[plr.Character] = os.clock() end
+	end)
+	local lastSeq = State:GetAttribute("GoalSeq") or 0
+	State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
+		local seq = State:GetAttribute("GoalSeq") or 0
+		if seq > lastSeq then
+			local team = State:GetAttribute("LastGoalTeam") or ""
+			for _, char in ipairs(characters()) do
+				if char:GetAttribute("KitTeam") == team then celebrate[char] = os.clock() + CELEBRATE_TIME end
+			end
+		end
+		lastSeq = seq
+	end)
+	preSim:Connect(function()
+		local cam = workspace.CurrentCamera
+		local camPos = cam and cam.CFrame.Position or Vector3.zero
+		local now = os.clock()
+		local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
+		local ownerChar = owner and owner.Character
+		for _, char in ipairs(characters()) do
+			local root = char:FindFirstChild("HumanoidRootPart")
+			if root and not active[char] and (root.Position - camPos).Magnitude < MOTION_RANGE then
+				local j = jointsOf(char)
+				local set = {}
+				local speed = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z).Magnitude
+				local function put(name, cf)
+					local jt = j[name]
+					if jt and jt.Parent then jt.Transform = cf set[name] = true end
+				end
+				if celebrate[char] and now < celebrate[char] then
+					-- Jubel: Arme im V nach oben, leicht winkend, Oberkörper etwas zurück
+					local wave = math.sin(now * 9) * 0.18
+					put("rsh", CFrame.Angles(0.35, 0, 2.4 + wave))
+					put("lsh", CFrame.Angles(0.35, 0, -2.4 - wave))
+					put("waist", CFrame.Angles(-0.15, 0, 0))
+				else
+					celebrate[char] = nil
+					local rec = receive[char]
+					if rec and now - rec < RECEIVE_TIME then
+						-- Annahme: Schussbein federt nach vorn, Arme zur Balance seitlich, Oberkörper leicht zurück
+						local s = math.sin(math.pi * (now - rec) / RECEIVE_TIME)
+						put("hip", CFrame.Angles(0.7 * s, 0, 0))
+						put("knee", CFrame.Angles(-0.7 * s, 0, 0))
+						put("waist", CFrame.Angles(-0.12 * s, 0, 0))
+						put("rsh", CFrame.Angles(0, 0, 0.5 * s))
+						put("lsh", CFrame.Angles(0, 0, -0.5 * s))
+					else
+						receive[char] = nil
+						if char == ownerChar and speed > 4 then
+							-- Ballkontakte beim Dribbeln: kurzer Tipp mit dem rechten Fuß im Takt
+							local phase = now % TOUCH_CYCLE
+							if phase < TOUCH_WINDOW then
+								local s = math.sin(math.pi * phase / TOUCH_WINDOW)
+								put("hip", CFrame.Angles(0.45 * s, 0, 0))
+								put("knee", CFrame.Angles(-0.35 * s, 0, 0))
+							end
+						end
+						if speed > SPRINT_SPEED then
+							-- Sprint: Oberkörper nach vorn gelegt
+							put("waist", CFrame.Angles(0.2, 0, 0))
+						end
+					end
+				end
+				-- Gelenke, die im letzten Frame überschrieben wurden und jetzt frei sind, zurück an den Animator
+				local prev = touched[char]
+				if prev then
+					for name in pairs(prev) do
+						if not set[name] and j[name] and j[name].Parent then j[name].Transform = CFrame.identity end
+					end
+				end
+				touched[char] = set
+			elseif root and not active[char] and touched[char] then
+				-- außer Reichweite: zuletzt überschriebene Gelenke freigeben (eine laufende Kickpose bleibt unberührt)
+				local j = jointsOf(char)
+				for name in pairs(touched[char]) do
+					if j[name] and j[name].Parent then j[name].Transform = CFrame.identity end
+				end
+				touched[char] = nil
+			end
+		end
+	end)
+end
 
 -- Normale Pässe/Schüsse/Paraden (Server meldet "KickAnim" mit der Figur): kurze Variante derselben Kickpose.
 -- Läuft keine AURORA-Animation an der Figur, sonst wird nichts überschrieben.

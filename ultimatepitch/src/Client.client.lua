@@ -149,6 +149,9 @@ end
 player.CharacterAdded:Connect(markOwn)
 if player.Character then task.spawn(markOwn, player.Character) end
 
+-- R15-Bewegungsebene (Sprint, Ballkontakte, Annahme, Torjubel) – nur Darstellung
+AuroraFX.startMotion(State)
+
 ---------------------------------------------------------------- Ballbesitz: Leuchtring unter dem Spieler am Ball
 -- Rein optisch; den Besitz bestimmt der Server (State@BallOwner = UserId, 0 = frei)
 local RING_SEGMENTS, RING_RADIUS = 16, 2.5
