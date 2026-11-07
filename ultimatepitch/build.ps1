@@ -27,6 +27,8 @@ function Item([string]$cls, [string]$ref, [string]$name, [string]$src, [string]$
 
 $rbxlx = "<roblox version=`"4`">`n" +
     "<Item class=`"Workspace`" referent=`"RBX0`"><Properties><string name=`"Name`">Workspace</string></Properties></Item>`n" +
+    "<Item class=`"Lighting`" referent=`"RBX8`"><Properties><string name=`"Name`">Lighting</string>" +
+    "<token name=`"LightingStyle`">0</token><bool name=`"PrioritizeLightingQuality`">false</bool></Properties></Item>`n" +
     "<Item class=`"ServerScriptService`" referent=`"RBX1`"><Properties><string name=`"Name`">ServerScriptService</string></Properties>`n" +
     (Item "Script" "RBX2" "UltimatePitchServer" $server (Item "ModuleScript" "RBX6" "Dome" $dome "")) + "`n" +
     "</Item>`n" +
@@ -44,9 +46,27 @@ $installer = "-- UltimatePitch v$V – Command-Bar-Installer (Alternative zur .r
     "end`n" +
     "local SSS = game:GetService(`"ServerScriptService`")`n" +
     "local SPS = game:GetService(`"StarterPlayer`"):FindFirstChildOfClass(`"StarterPlayerScripts`")`n" +
+    "-- Schutz: Der Installer löscht nichts. Vorhandene UltimatePitch-Objekte werden nur nach ausdrücklicher`n" +
+    "-- Bestätigung (_G.UP_REPLACE = true) ersetzt und vorher nach ServerStorage verschoben (Rückgängig: Strg+Z).`n" +
+    "local old = {}`n" +
     "for _, o in pairs({ SSS:FindFirstChild(`"UltimatePitchServer`"), SPS:FindFirstChild(`"UltimatePitchClient`"),`n" +
     "`tworkspace:FindFirstChild(`"UltimatePitch`"), game:GetService(`"ReplicatedStorage`"):FindFirstChild(`"UltimatePitch`") }) do`n" +
-    "`tif o then o:Destroy() end`n" +
+    "`ttable.insert(old, o)`n" +
+    "end`n" +
+    "if #old > 0 and _G.UP_REPLACE ~= true then`n" +
+    "`tlocal names = {}`n" +
+    "`tfor _, o in ipairs(old) do table.insert(names, o:GetFullName()) end`n" +
+    "`terror(`"⚠ Nichts verändert: vorhandene UltimatePitch-Objekte gefunden (`" .. table.concat(names, `", `") .. `"). `" ..`n" +
+    "`t`t`"Zum Ersetzen zuerst  _G.UP_REPLACE = true  ausführen, dann den Installer erneut. Alte Objekte werden nach ServerStorage gesichert.`")`n" +
+    "end`n" +
+    "_G.UP_REPLACE = nil`n" +
+    "game:GetService(`"ChangeHistoryService`"):SetWaypoint(`"Vor UltimatePitch v$V`")`n" +
+    "if #old > 0 then`n" +
+    "`tlocal backup = Instance.new(`"Folder`")`n" +
+    "`tbackup.Name = `"UP_Backup_`" .. os.date(`"%Y%m%d_%H%M%S`")`n" +
+    "`tfor _, o in ipairs(old) do o.Parent = backup end`n" +
+    "`tbackup.Parent = game:GetService(`"ServerStorage`")`n" +
+    "`tprint(`"ℹ Alte UltimatePitch-Objekte gesichert: ServerStorage.`" .. backup.Name)`n" +
     "end`n" +
     "local s = Instance.new(`"Script`") s.Name = `"UltimatePitchServer`" s.Source = [==[$server]==]`n" +
     "local sd = Instance.new(`"ModuleScript`") sd.Name = `"Dome`" sd.Source = [==[$dome]==] sd.Parent = s`n" +

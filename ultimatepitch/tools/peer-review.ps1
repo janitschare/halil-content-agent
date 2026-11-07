@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 UltimatePitch v0.5: run one independent Codex review after a Claude Code milestone.
 No API key in the repository. No autonomous GitHub push, studio access, or code writes.
@@ -47,10 +47,17 @@ try {
     $report = Join-Path $reviewDir ("review_" + $shaShort + ".md")
     $latest = Join-Path $reviewDir "LATEST_REVIEW.md"
     $changedList = ($changed -join ", ")
+    # Windows: Die read-only-Sandbox von Codex kann dort keine Shell-Prozesse starten
+    # ("helper_unknown_error: setup refresh had errors"). Darum bekommt Codex den committeten Diff
+    # mit 25 Kontextzeilen direkt über stdin (als <stdin>-Block) und braucht keinen Dateizugriff.
+    $diff = (& git diff -U25 $from $current -- src tests default.project.json build.ps1 build.py) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "Git diff (Inhalt) fehlgeschlagen." }
+    if ($diff.Length -gt 400000) { throw "Diff zu groß ($($diff.Length) Zeichen). Bitte Meilenstein aufteilen." }
     $prompt = @"
 You are an independent critical code reviewer for a Roblox Luau 5v5 football game.
 This is a READ-ONLY security/correctness review. DO NOT modify or create project source files.
-Inspect the actual current working-tree source and the committed diff: git diff $from $current -- src tests default.project.json build.ps1 build.py
+The complete committed diff (git diff -U25 $from $current -- src tests default.project.json build.ps1 build.py)
+is attached below as the <stdin> block. Base your review on that diff; shell/file access may be unavailable.
 Changed files: $changedList
 
 Review server authority for Kick/Pass/Shot/Aurora, remote-event schema, rate limits, goal attribution, stamina and movement validation.
@@ -67,7 +74,8 @@ Do NOT request another full 10-client test by default. No asset purchases/upload
 Write in German. Keep the review under 900 words.
 "@
     Write-Host "Codex Read-only Review: $($current.Substring(0, 12)) vs $($from.Substring(0, 12))"
-    & codex exec --sandbox read-only --output-last-message $report $prompt
+    $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $diff | & codex exec --sandbox read-only --output-last-message $report $prompt
     $exit = $LASTEXITCODE
     if ($exit -ne 0 -or -not (Test-Path -LiteralPath $report) -or (Get-Item -LiteralPath $report).Length -eq 0) {
         throw "Codex-Review schlug fehl (Exitcode: $exit). Kein PASS und kein Bericht vorgetäuscht."

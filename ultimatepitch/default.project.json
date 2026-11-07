@@ -3,7 +3,7 @@
   "servePort": 34872,
   "tree": {
     "$className": "DataModel",
-    "Lighting": { "$properties": { "Technology": "Future" } },
+    "Lighting": { "$properties": { "LightingStyle": "Realistic", "PrioritizeLightingQuality": false } },
     "ServerScriptService": {
       "UltimatePitchServer": {
         "$path": "src/Server.server.lua",

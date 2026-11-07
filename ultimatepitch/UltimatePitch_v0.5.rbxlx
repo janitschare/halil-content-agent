@@ -1,5 +1,6 @@
 <roblox version="4">
 <Item class="Workspace" referent="RBX0"><Properties><string name="Name">Workspace</string></Properties></Item>
+<Item class="Lighting" referent="RBX8"><Properties><string name="Name">Lighting</string><token name="LightingStyle">0</token><bool name="PrioritizeLightingQuality">false</bool></Properties></Item>
 <Item class="ServerScriptService" referent="RBX1"><Properties><string name="Name">ServerScriptService</string></Properties>
 <Item class="Script" referent="RBX2"><Properties><string name="Name">UltimatePitchServer</string><bool name="Disabled">false</bool><ProtectedString name="Source"><![CDATA[-- UltimatePitch v0.5 · Server (baut die Welt beim Start selbst)
 local VERSION = "0.5"

@@ -5,9 +5,27 @@ if game:GetService("RunService"):IsRunning() then
 end
 local SSS = game:GetService("ServerScriptService")
 local SPS = game:GetService("StarterPlayer"):FindFirstChildOfClass("StarterPlayerScripts")
+-- Schutz: Der Installer löscht nichts. Vorhandene UltimatePitch-Objekte werden nur nach ausdrücklicher
+-- Bestätigung (_G.UP_REPLACE = true) ersetzt und vorher nach ServerStorage verschoben (Rückgängig: Strg+Z).
+local old = {}
 for _, o in pairs({ SSS:FindFirstChild("UltimatePitchServer"), SPS:FindFirstChild("UltimatePitchClient"),
 	workspace:FindFirstChild("UltimatePitch"), game:GetService("ReplicatedStorage"):FindFirstChild("UltimatePitch") }) do
-	if o then o:Destroy() end
+	table.insert(old, o)
+end
+if #old > 0 and _G.UP_REPLACE ~= true then
+	local names = {}
+	for _, o in ipairs(old) do table.insert(names, o:GetFullName()) end
+	error("⚠ Nichts verändert: vorhandene UltimatePitch-Objekte gefunden (" .. table.concat(names, ", ") .. "). " ..
+		"Zum Ersetzen zuerst  _G.UP_REPLACE = true  ausführen, dann den Installer erneut. Alte Objekte werden nach ServerStorage gesichert.")
+end
+_G.UP_REPLACE = nil
+game:GetService("ChangeHistoryService"):SetWaypoint("Vor UltimatePitch v0.5")
+if #old > 0 then
+	local backup = Instance.new("Folder")
+	backup.Name = "UP_Backup_" .. os.date("%Y%m%d_%H%M%S")
+	for _, o in ipairs(old) do o.Parent = backup end
+	backup.Parent = game:GetService("ServerStorage")
+	print("ℹ Alte UltimatePitch-Objekte gesichert: ServerStorage." .. backup.Name)
 end
 local s = Instance.new("Script") s.Name = "UltimatePitchServer" s.Source = [==[-- UltimatePitch v0.5 · Server (baut die Welt beim Start selbst)
 local VERSION = "0.5"
