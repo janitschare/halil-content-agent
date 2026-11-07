@@ -194,7 +194,7 @@ new("Team", { Name = "Blau", TeamColor = BrickColor.new("Really blue"), AutoAssi
 local shared = new("Folder", { Name = "UltimatePitch" }, RS)
 local state = new("Folder", { Name = "State" }, shared)
 for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION,
-	GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false }) do
+	GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false, BallOwner = 0 }) do
 	state:SetAttribute(k, val)
 end
 new("RemoteEvent", { Name = "Kick" }, shared)
@@ -296,6 +296,9 @@ local CFG = {
 	ChargeTime = 1, ChargeMaxHold = 4,
 	StaminaMax = 100, SprintDrain = 25, StaminaRegen = 16, SprintMinStamina = 5,
 	MoveBurst = 12, -- Streckenbudget (Studs) für Netzwerk-Schübe, siehe Bewegungsprüfung
+	-- Ballgefühl: Dribbel-Reichweite, Abstand des Balls vor dem Fuß, Zugstärke, Sperrzeit nach Schuss/Pass
+	DribbleRange = 3.6, DribbleDist = 2.4, DribbleGain = 6, KickGrace = 0.35,
+	TackleRange = 3, TackleChance = 0.35, TackleRetry = 0.8, -- Bot-Zweikampf gegen dribbelnde Menschen
 	-- AURORA BREAK (Elite-Abschluss, eigene Testwerte)
 	AuroraRange = 6, AuroraCooldown = 12, AuroraStamina = 30, AuroraWindup = 0.3,
 	AuroraSpeed = 128, AuroraLift = 9, AuroraGoalWindow = 2,
@@ -324,6 +327,7 @@ local auroraHold = nil      -- { player, releaseAt } während des Anlaufs: Ball 
 -- Ein Tor zählt nur als AURORA-Tor, wenn das Token noch gilt und das Tor für das Team des Schützen fällt.
 local auroraShot = nil
 local auroraShotSeq = 0
+local ballOwner = nil -- Spieler (Mensch), der den Ball gerade führt; siehe dribble()
 local EffectEvent = SHARED:WaitForChild("Effect")
 
 -- Gewollter Server-Teleport: Bezugspunkt der Bewegungsprüfung mitziehen, sonst würde sie zurücksetzen
@@ -365,7 +369,9 @@ local function resetBall()
 end
 -- kicker (optional): Figur, die den Ball spielt. Clients zeigen dazu nur eine Schussanimation ("KickAnim");
 -- Ballrichtung und -tempo setzt allein der Server.
+local lastBallKickAt = 0 -- Zeitpunkt der letzten Schuss-/Passaktion: kurz danach kein Dribbel-Fangen
 local function kickBall(vel, kicker)
+	lastBallKickAt = os.clock()
 	auroraShot = nil -- jede neue Ballaktion beendet die Zuordnung zum letzten AURORA-Schuss
 	local k = Ball:FindFirstChild("Kick")
 	if k then
@@ -733,11 +739,17 @@ local function thinkTeam(teamName)
 	local s = td.sign
 	local bp = Ball.Position
 	local list = members(teamName)
+	-- Ballbesitz eines Menschen: eigenes Team lässt ihm den Ball (Bots laufen sich frei),
+	-- Gegner dürfen nur aus kurzer Distanz mit begrenzter Erfolgschance tackeln
+	local ownerTeam = ballOwner and ballOwner.Team and ballOwner.Team.Name
+	local teammateHasBall = ownerTeam == teamName
 	local chaser, cd = nil, math.huge
-	for _, m in ipairs(list) do
-		if m.slot ~= 1 then
-			local d = flat(m.root.Position - bp).Magnitude
-			if d < cd then chaser, cd = m, d end
+	if not teammateHasBall then
+		for _, m in ipairs(list) do
+			if m.slot ~= 1 then
+				local d = flat(m.root.Position - bp).Magnitude
+				if d < cd then chaser, cd = m, d end
+			end
 		end
 	end
 	for _, m in ipairs(list) do
@@ -751,11 +763,26 @@ local function thinkTeam(teamName)
 				else
 					local home = slotPos(td, m.slot)
 					target = Vector3.new(home.X + bp.X * 0.5, 0, home.Z * 0.8 + bp.Z * 0.3)
+					-- Mitspieler am Ball: vor den Ball in Richtung gegnerisches Tor anbieten
+					if teammateHasBall then target += Vector3.new(s * 14, 0, 0) end
 				end
 				m.hum:MoveTo(clampField(target))
 				local rel = bp - m.root.Position
-				if flat(rel).Magnitude < 4.5 and bp.Y < CFG.GroundY + 5 then
-					botKick(td, m, list)
+				local dist = flat(rel).Magnitude
+				if not teammateHasBall and dist < 4.5 and bp.Y < CFG.GroundY + 5 then
+					if ownerTeam then
+						-- Tackling gegen einen dribbelnden Menschen
+						local now = os.clock()
+						if dist < CFG.TackleRange and (botCd[m.model] or 0) <= now then
+							if math.random() < CFG.TackleChance then
+								botKick(td, m, list)
+							else
+								botCd[m.model] = now + CFG.TackleRetry
+							end
+						end
+					else
+						botKick(td, m, list)
+					end
 				end
 			end
 		end
@@ -1030,10 +1057,54 @@ Players.PlayerRemoving:Connect(function(plr)
 	end
 end)
 
+-- Ballgefühl: serverseitiges Dribbling mit Ballannahme. Der nächste Feldspieler (Mensch) in DribbleRange
+-- führt den Ball: der Ball wird weich zu einem Punkt vor seinen Füßen gezogen und läuft mit seinem Tempo mit;
+-- ein ankommender Pass wird dabei auf Führungstempo abgebremst (Ballannahme). Berechnet nur aus Server-
+-- Positionen, der Client sendet dafür nichts. Kurz nach jeder Schuss-/Passaktion (KickGrace) greift es nicht,
+-- damit gespielte Bälle den Fuß verlassen. Bots bleiben bei ihrer Kick-Logik und können den Ball abnehmen.
+local function setOwner(plr)
+	if ballOwner == plr then return end
+	ballOwner = plr
+	State:SetAttribute("BallOwner", plr and plr.UserId or 0)
+end
+local function dribble()
+	if os.clock() - lastBallKickAt < CFG.KickGrace then setOwner(nil) return end
+	local bp = Ball.Position
+	if bp.Y > CFG.GroundY + 3 then setOwner(nil) return end
+	local best, bestRoot, bestD = nil, nil, CFG.DribbleRange
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local td = TEAM[plr.Team and plr.Team.Name]
+		local char = plr.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if td and root and hum and hum.Health > 0 then
+			local d = flat(bp - root.Position).Magnitude
+			-- Besitzer behält den Ball etwas länger (Hysterese), damit er bei Richtungswechseln nicht verspringt
+			if plr == ballOwner then d -= 0.6 end
+			if d < bestD then best, bestRoot, bestD = plr, root, d end
+		end
+	end
+	setOwner(best)
+	if not best then return end
+	auroraShot = nil -- Ballannahme durch einen Spieler beendet jeden AURORA-Schuss
+	local look = unit(flat(bestRoot.CFrame.LookVector), Vector3.new(1, 0, 0))
+	local runVel = flat(bestRoot.AssemblyLinearVelocity)
+	local target = Vector3.new(bestRoot.Position.X, bp.Y, bestRoot.Position.Z) + look * CFG.DribbleDist
+	local pull = flat(target - bp) * CFG.DribbleGain
+	local desired = runVel + pull
+	local maxSpeed = runVel.Magnitude * 1.5 + 8
+	if desired.Magnitude > maxSpeed then desired = desired.Unit * maxSpeed end
+	local vel = Ball.AssemblyLinearVelocity
+	Ball.AssemblyLinearVelocity = Vector3.new(desired.X, math.min(vel.Y, 2), desired.Z)
+	-- Rollbewegung passend zur Laufrichtung (Radius 1,1)
+	Ball.AssemblyAngularVelocity = Vector3.yAxis:Cross(desired) / 1.1
+end
+
 local aiAcc = 0
 RunService.Heartbeat:Connect(function(dt)
 	if not inMatch() then
 		if auroraHold then auroraHold = nil end
+		setOwner(nil)
 		return
 	end
 	-- AURORA BREAK Anlauf: Ball liegt vor dem Schützen, bis der Server am Kick-Marker schießt
@@ -1047,6 +1118,7 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 		if os.clock() >= auroraHold.releaseAt then releaseAurora() end
 	end
+	if not pendingGoal and not auroraHold then dribble() end
 	local p = Ball.Position
 	-- Tor?
 	if not pendingGoal and math.abs(p.Z) < CFG.GoalHalfWidth and p.Y < CFG.GroundY + CFG.GoalHeight then
@@ -1685,6 +1757,47 @@ local function markOwn(char)
 end
 player.CharacterAdded:Connect(markOwn)
 if player.Character then task.spawn(markOwn, player.Character) end
+
+---------------------------------------------------------------- Ballbesitz: Leuchtring unter dem Spieler am Ball
+-- Rein optisch; den Besitz bestimmt der Server (State@BallOwner = UserId, 0 = frei)
+local RING_SEGMENTS, RING_RADIUS = 16, 2.5
+local ringFolder = Instance.new("Folder")
+ringFolder.Name = "UP_PossessionRing"
+ringFolder.Parent = workspace
+local ringParts = {}
+for i = 1, RING_SEGMENTS do
+	local seg = Instance.new("Part")
+	seg.Size = Vector3.new(0.25, 0.06, 2 * math.pi * RING_RADIUS / RING_SEGMENTS * 0.8)
+	seg.Anchored, seg.CanCollide, seg.CanQuery, seg.CanTouch, seg.CastShadow = true, false, false, false, false
+	seg.Material = Enum.Material.Neon
+	seg.Transparency = 1
+	seg.Parent = ringFolder
+	ringParts[i] = seg
+end
+local ringVisible = false
+RunService.RenderStepped:Connect(function()
+	local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
+	local root = owner and owner.Character and owner.Character:FindFirstChild("HumanoidRootPart")
+	local hum = owner and owner.Character and owner.Character:FindFirstChildOfClass("Humanoid")
+	if not (root and hum) then
+		if ringVisible then
+			for _, seg in ipairs(ringParts) do seg.Transparency = 1 end
+			ringVisible = false
+		end
+		return
+	end
+	local feet = Vector3.new(root.Position.X, root.Position.Y - hum.HipHeight - root.Size.Y / 2 + 0.06, root.Position.Z)
+	local color = (owner.Team and owner.Team.Name == "Rot") and RED or BLUE
+	local spin = os.clock() * 1.5
+	for i, seg in ipairs(ringParts) do
+		local a = spin + (i / RING_SEGMENTS) * math.pi * 2
+		local pos = feet + Vector3.new(math.cos(a), 0, math.sin(a)) * RING_RADIUS
+		seg.CFrame = CFrame.lookAt(pos, pos + Vector3.new(-math.sin(a), 0, math.cos(a)))
+		seg.Color = color
+		seg.Transparency = 0.1
+	end
+	ringVisible = true
+end)
 
 ---------------------------------------------------------------- Reduzierte Bewegung
 local function systemReducedMotion()

@@ -149,6 +149,47 @@ end
 player.CharacterAdded:Connect(markOwn)
 if player.Character then task.spawn(markOwn, player.Character) end
 
+---------------------------------------------------------------- Ballbesitz: Leuchtring unter dem Spieler am Ball
+-- Rein optisch; den Besitz bestimmt der Server (State@BallOwner = UserId, 0 = frei)
+local RING_SEGMENTS, RING_RADIUS = 16, 2.5
+local ringFolder = Instance.new("Folder")
+ringFolder.Name = "UP_PossessionRing"
+ringFolder.Parent = workspace
+local ringParts = {}
+for i = 1, RING_SEGMENTS do
+	local seg = Instance.new("Part")
+	seg.Size = Vector3.new(0.25, 0.06, 2 * math.pi * RING_RADIUS / RING_SEGMENTS * 0.8)
+	seg.Anchored, seg.CanCollide, seg.CanQuery, seg.CanTouch, seg.CastShadow = true, false, false, false, false
+	seg.Material = Enum.Material.Neon
+	seg.Transparency = 1
+	seg.Parent = ringFolder
+	ringParts[i] = seg
+end
+local ringVisible = false
+RunService.RenderStepped:Connect(function()
+	local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
+	local root = owner and owner.Character and owner.Character:FindFirstChild("HumanoidRootPart")
+	local hum = owner and owner.Character and owner.Character:FindFirstChildOfClass("Humanoid")
+	if not (root and hum) then
+		if ringVisible then
+			for _, seg in ipairs(ringParts) do seg.Transparency = 1 end
+			ringVisible = false
+		end
+		return
+	end
+	local feet = Vector3.new(root.Position.X, root.Position.Y - hum.HipHeight - root.Size.Y / 2 + 0.06, root.Position.Z)
+	local color = (owner.Team and owner.Team.Name == "Rot") and RED or BLUE
+	local spin = os.clock() * 1.5
+	for i, seg in ipairs(ringParts) do
+		local a = spin + (i / RING_SEGMENTS) * math.pi * 2
+		local pos = feet + Vector3.new(math.cos(a), 0, math.sin(a)) * RING_RADIUS
+		seg.CFrame = CFrame.lookAt(pos, pos + Vector3.new(-math.sin(a), 0, math.cos(a)))
+		seg.Color = color
+		seg.Transparency = 0.1
+	end
+	ringVisible = true
+end)
+
 ---------------------------------------------------------------- Reduzierte Bewegung
 local function systemReducedMotion()
 	local ok, on = pcall(function() return GuiService.ReducedMotionEnabled end)
