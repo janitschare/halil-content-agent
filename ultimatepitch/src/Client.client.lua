@@ -179,7 +179,7 @@ RunService.RenderStepped:Connect(function()
 	end
 	local feet = Vector3.new(root.Position.X, root.Position.Y - hum.HipHeight - root.Size.Y / 2 + 0.06, root.Position.Z)
 	local color = (owner.Team and owner.Team.Name == "Rot") and RED or BLUE
-	local spin = os.clock() * 1.5
+	local spin = AuroraFX.reducedMotion and 0 or os.clock() * 1.5 -- bei reduzierter Bewegung steht der Ring
 	for i, seg in ipairs(ringParts) do
 		local a = spin + (i / RING_SEGMENTS) * math.pi * 2
 		local pos = feet + Vector3.new(math.cos(a), 0, math.sin(a)) * RING_RADIUS

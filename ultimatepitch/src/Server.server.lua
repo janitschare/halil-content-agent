@@ -268,7 +268,7 @@ local CFG = {
 	StaminaMax = 100, SprintDrain = 25, StaminaRegen = 16, SprintMinStamina = 5,
 	MoveBurst = 12, -- Streckenbudget (Studs) für Netzwerk-Schübe, siehe Bewegungsprüfung
 	-- Ballgefühl: Dribbel-Reichweite, Abstand des Balls vor dem Fuß, Zugstärke, Sperrzeit nach Schuss/Pass
-	DribbleRange = 3.6, DribbleDist = 2.4, DribbleGain = 6, KickGrace = 0.35,
+	DribbleRange = 3.6, DribbleDist = 2.4, DribbleGain = 6, KickGrace = 0.35, DribbleMaxBall = 45,
 	TackleRange = 3, TackleChance = 0.35, TackleRetry = 0.8, -- Bot-Zweikampf gegen dribbelnde Menschen
 	-- AURORA BREAK (Elite-Abschluss, eigene Testwerte)
 	AuroraRange = 6, AuroraCooldown = 12, AuroraStamina = 30, AuroraWindup = 0.3,
@@ -1048,7 +1048,10 @@ local function dribble()
 		local char = plr.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if td and root and hum and hum.Health > 0 then
+		-- Höhenprüfung: Ballmitte höchstens 2,5 Studs über/unter Ballmitte am Boden vor den Füßen
+		-- (verhindert Annahmen beim Überspringen oder von erhöhten Figuren)
+		local feetY = root and hum and (root.Position.Y - hum.HipHeight - root.Size.Y / 2)
+		if td and root and hum and hum.Health > 0 and math.abs(bp.Y - (feetY + 1.1)) < 2.5 then
 			local d = flat(bp - root.Position).Magnitude
 			-- Besitzer behält den Ball etwas länger (Hysterese), damit er bei Richtungswechseln nicht verspringt
 			if plr == ballOwner then d -= 0.6 end
@@ -1059,11 +1062,18 @@ local function dribble()
 	if not best then return end
 	auroraShot = nil -- Ballannahme durch einen Spieler beendet jeden AURORA-Schuss
 	local look = unit(flat(bestRoot.CFrame.LookVector), Vector3.new(1, 0, 0))
+	-- Die Figurgeschwindigkeit stammt aus der Physik der (clientbesessenen) Figur und ist damit nicht
+	-- vertrauenswürdig: nur endliche Werte zulassen und auf das serverseitig erlaubte Höchsttempo
+	-- (BaseSpeed × Sprintfaktor) begrenzen; das Ergebnis zusätzlich absolut auf DribbleMaxBall.
 	local runVel = flat(bestRoot.AssemblyLinearVelocity)
+	local runMag = runVel.Magnitude
+	if runMag ~= runMag or runMag == math.huge then runVel = Vector3.zero end -- NaN oder unendlich
+	local allowed = ((bestRoot.Parent and bestRoot.Parent:GetAttribute("BaseSpeed")) or 16) * CFG.SprintFactor
+	if runVel.Magnitude > allowed then runVel = runVel.Unit * allowed end
 	local target = Vector3.new(bestRoot.Position.X, bp.Y, bestRoot.Position.Z) + look * CFG.DribbleDist
 	local pull = flat(target - bp) * CFG.DribbleGain
 	local desired = runVel + pull
-	local maxSpeed = runVel.Magnitude * 1.5 + 8
+	local maxSpeed = math.min(runVel.Magnitude * 1.5 + 8, CFG.DribbleMaxBall)
 	if desired.Magnitude > maxSpeed then desired = desired.Unit * maxSpeed end
 	local vel = Ball.AssemblyLinearVelocity
 	Ball.AssemblyLinearVelocity = Vector3.new(desired.X, math.min(vel.Y, 2), desired.Z)
