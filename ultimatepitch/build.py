@@ -31,6 +31,7 @@ def item(cls, ref, name, source, children=""):
 
 rbxlx = f'''<roblox version="4">
 <Item class="Workspace" referent="RBX0"><Properties><string name="Name">Workspace</string></Properties></Item>
+<Item class="Lighting" referent="RBX8"><Properties><string name="Name">Lighting</string><token name="LightingStyle">0</token><bool name="PrioritizeLightingQuality">false</bool></Properties></Item>
 <Item class="ServerScriptService" referent="RBX1"><Properties><string name="Name">ServerScriptService</string></Properties>
 {item("Script", "RBX2", "UltimatePitchServer", server, item("ModuleScript", "RBX6", "Dome", dome))}
 </Item>

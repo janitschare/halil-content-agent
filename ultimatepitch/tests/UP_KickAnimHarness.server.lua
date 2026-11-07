@@ -61,7 +61,24 @@ task.spawn(function()
 		if n >= 2 then break end
 		task.wait(0.5)
 	end
-	local result = { ok = true, passer = first.Name, feeds = feeds, passRequests = passReq }
+	-- Grün nur mit Endberichten beider Spieler, ohne Clientfehler, mit sichtbar animierten Kicks auf
+	-- jedem Client und mindestens einem animierten Kick des jeweils anderen Spielers (Netzwerkpfad).
+	local why = {}
+	for _, p in ipairs(plist) do
+		local r = reports[p.Name .. ":kick"]
+		if not r then
+			table.insert(why, p.Name .. ": kein Endbericht")
+		else
+			local animated = tonumber(r:match("animiert=(%d+)")) or 0
+			local errors = tonumber(r:match("fehler=(%d+)")) or 0
+			if animated == 0 then table.insert(why, p.Name .. ": keine animierten Kicks") end
+			if errors > 0 then table.insert(why, p.Name .. ": " .. errors .. " Fehler") end
+			if p ~= first and (tonumber(r:match("anderer_animiert=(%d+)")) or 0) == 0 then
+				table.insert(why, p.Name .. ": Pass des anderen Spielers nicht animiert gesehen")
+			end
+		end
+	end
+	local result = { ok = #why == 0, why = table.concat(why, "; "), passer = first.Name, feeds = feeds, passRequests = passReq }
 	for k, v in pairs(reports) do result[k] = v end
 	finish(result)
 end)
