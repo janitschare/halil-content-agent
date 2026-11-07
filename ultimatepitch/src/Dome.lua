@@ -142,7 +142,7 @@ function Dome.build(root, gy, state)
 		deco({
 			Name = "RoofPanel", Size = Vector3.new(width, 0.6, radial.Magnitude),
 			CFrame = CFrame.lookAt(roofMid, roofMid + radial) * CFrame.Angles(math.rad(-4), 0, 0),
-			Material = Enum.Material.Glass, Transparency = 0.45, Color = Color3.fromRGB(26, 34, 52),
+			Material = Enum.Material.Metal, Color = Color3.fromRGB(18, 22, 36), -- geschlossene Dachfläche über den Rängen
 		}, roof)
 		arcPart(t1, t2, 20, ROOF_Y - 0.6, 1.2, 1.2, { Name = "InnerRing", Material = Enum.Material.Metal, Color = STEEL }, roof, true)
 		arcPart(t1, t2, 19.3, ROOF_Y - 1.6, 0.3, 0.5, { Name = "LEDRoof", Material = Enum.Material.Neon, Color = PINK }, led, true)
@@ -155,6 +155,9 @@ function Dome.build(root, gy, state)
 				Material = Enum.Material.Metal, Color = STEEL,
 			}, roof)
 			truss.Name = "RoofTruss"
+			-- Leuchtband unter dem Träger (Hallen-Look)
+			deco({ Name = "LEDTruss", Size = Vector3.new(0.35, 0.35, radial.Magnitude - 2),
+				CFrame = truss.CFrame * CFrame.new(0, -1.45, 0), Material = Enum.Material.Neon, Color = CYAN }, led)
 			part({ Name = "Column", Size = Vector3.new(2, ROOF_Y - gy, 2), Position = outer + Vector3.new(0, (ROOF_Y + gy) / 2, 0),
 				Material = Enum.Material.Metal, Color = STEEL }, roof)
 			local lampPos = inner + Vector3.new(0, ROOF_Y - 2.6, 0)
@@ -165,7 +168,7 @@ function Dome.build(root, gy, state)
 			}, roof)
 			local light = Instance.new("SpotLight")
 			light.Face = Enum.NormalId.Front
-			light.Brightness = 2.4
+			light.Brightness = 4
 			light.Range = 60
 			light.Angle = 70
 			light.Color = Color3.fromRGB(220, 240, 255)
@@ -192,7 +195,7 @@ function Dome.build(root, gy, state)
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 	gui.PixelsPerStud = 24
 	gui.LightInfluence = 0
-	gui.Brightness = 2
+	gui.Brightness = 1.2 -- unter der Bloom-Schwelle, damit die Tafel nicht überstrahlt
 	gui.Parent = board
 	local text = Instance.new("TextLabel")
 	text.Size = UDim2.fromScale(1, 1)

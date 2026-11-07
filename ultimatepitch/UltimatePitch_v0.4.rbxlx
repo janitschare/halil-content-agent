@@ -106,7 +106,8 @@ end
 
 -- Banden (Glas, Lücke für Tore)
 -- SmoothPlastic statt Glass: Glass blendet dahinterliegende SurfaceGuis (LED-Banden) aus
-local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.85, Color = Color3.fromRGB(200, 230, 255) }
+-- Transparenz 0.96: unter Nachtlicht würde eine sichtbarere Bande als heller Schleier über dem Feld liegen
+local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.96, Color = Color3.fromRGB(200, 230, 255) }
 local function wall(size, pos)
 	local p = part({ Name = "Wall", Size = size, Position = pos }, walls)
 	for k, val in pairs(glass) do p[k] = val end
@@ -133,7 +134,7 @@ local a1 = new("Attachment", { Position = Vector3.new(0, -0.4, 0) }, ball)
 new("Trail", { Attachment0 = a0, Attachment1 = a1, Lifetime = 0.25, Transparency = NumberSequence.new(0.4, 1) }, ball)
 
 -- Lobby (schwebt über der Seitenlinie, Blick aufs Feld)
-local LC = Vector3.new(0, 100, -95)
+local LC = Vector3.new(0, 70, -240) -- hinter der Außenwand des SPECTRA DOME: vom Spielfeld aus nicht sichtbar
 part({ Name = "Floor", Size = Vector3.new(50, 2, 40), Position = LC, Material = Enum.Material.Slate, Color = Color3.fromRGB(40, 44, 52) }, lobby)
 for _, w in ipairs({
 	{ Vector3.new(50, 8, 1), Vector3.new(0, 5, -20.5) },
@@ -214,24 +215,25 @@ for _, side in ipairs({ -1, 1 }) do
 	end
 end
 
--- Atmosphaere: Abendspiel unter Flutlicht
+-- Atmosphaere: Nachtspiel in der Halle – dunkler, blauer Himmel, LED-Bänder leuchten über Bloom,
+-- das Feld bleibt über das Umgebungslicht satt grün lesbar
 local Lighting = game:GetService("Lighting")
 for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	local o = Lighting:FindFirstChild(n)
 	if o then o:Destroy() end
 end
 pcall(function()
-	Lighting.ClockTime = 17.6
-	Lighting.Brightness = 2.6
-	Lighting.OutdoorAmbient = Color3.fromRGB(150, 160, 185)
-	Lighting.Ambient = Color3.fromRGB(70, 80, 105)
-	Lighting.EnvironmentDiffuseScale = 0.5
-	Lighting.EnvironmentSpecularScale = 0.5
+	Lighting.ClockTime = 20.3
+	Lighting.Brightness = 1.5
+	Lighting.OutdoorAmbient = Color3.fromRGB(120, 140, 185)
+	Lighting.Ambient = Color3.fromRGB(60, 72, 120)
+	Lighting.EnvironmentDiffuseScale = 0.6
+	Lighting.EnvironmentSpecularScale = 0.8
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.22, Offset = 0.1, Color = Color3.fromRGB(150, 175, 230),
-	Decay = Color3.fromRGB(70, 90, 160), Glare = 0.3, Haze = 1 }, Lighting)
-new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.5, Size = 28, Threshold = 1.7 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.04, Contrast = 0.12, Saturation = 0.12, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.26, Offset = 0.1, Color = Color3.fromRGB(40, 70, 170),
+	Decay = Color3.fromRGB(20, 30, 90), Glare = 0.4, Haze = 1.4 }, Lighting)
+new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.9, Size = 30, Threshold = 1.05 }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.05, Contrast = 0.16, Saturation = 0.3, TintColor = Color3.fromRGB(228, 236, 255) }, Lighting)
 
 end
 
@@ -1072,7 +1074,7 @@ function Dome.build(root, gy, state)
 		deco({
 			Name = "RoofPanel", Size = Vector3.new(width, 0.6, radial.Magnitude),
 			CFrame = CFrame.lookAt(roofMid, roofMid + radial) * CFrame.Angles(math.rad(-4), 0, 0),
-			Material = Enum.Material.Glass, Transparency = 0.45, Color = Color3.fromRGB(26, 34, 52),
+			Material = Enum.Material.Metal, Color = Color3.fromRGB(18, 22, 36), -- geschlossene Dachfläche über den Rängen
 		}, roof)
 		arcPart(t1, t2, 20, ROOF_Y - 0.6, 1.2, 1.2, { Name = "InnerRing", Material = Enum.Material.Metal, Color = STEEL }, roof, true)
 		arcPart(t1, t2, 19.3, ROOF_Y - 1.6, 0.3, 0.5, { Name = "LEDRoof", Material = Enum.Material.Neon, Color = PINK }, led, true)
@@ -1085,6 +1087,9 @@ function Dome.build(root, gy, state)
 				Material = Enum.Material.Metal, Color = STEEL,
 			}, roof)
 			truss.Name = "RoofTruss"
+			-- Leuchtband unter dem Träger (Hallen-Look)
+			deco({ Name = "LEDTruss", Size = Vector3.new(0.35, 0.35, radial.Magnitude - 2),
+				CFrame = truss.CFrame * CFrame.new(0, -1.45, 0), Material = Enum.Material.Neon, Color = CYAN }, led)
 			part({ Name = "Column", Size = Vector3.new(2, ROOF_Y - gy, 2), Position = outer + Vector3.new(0, (ROOF_Y + gy) / 2, 0),
 				Material = Enum.Material.Metal, Color = STEEL }, roof)
 			local lampPos = inner + Vector3.new(0, ROOF_Y - 2.6, 0)
@@ -1095,7 +1100,7 @@ function Dome.build(root, gy, state)
 			}, roof)
 			local light = Instance.new("SpotLight")
 			light.Face = Enum.NormalId.Front
-			light.Brightness = 2.4
+			light.Brightness = 4
 			light.Range = 60
 			light.Angle = 70
 			light.Color = Color3.fromRGB(220, 240, 255)
@@ -1122,7 +1127,7 @@ function Dome.build(root, gy, state)
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 	gui.PixelsPerStud = 24
 	gui.LightInfluence = 0
-	gui.Brightness = 2
+	gui.Brightness = 1.2 -- unter der Bloom-Schwelle, damit die Tafel nicht überstrahlt
 	gui.Parent = board
 	local text = Instance.new("TextLabel")
 	text.Size = UDim2.fromScale(1, 1)
@@ -1544,6 +1549,45 @@ local function cameraPush(amount)
 	end)
 end
 
+-- Bildschirm-Speedlines (nur Schütze, aus bei Reduced Motion): radiale Streifen vom Bildrand zur Mitte hin,
+-- die nach außen wegschießen. Eigene ScreenGui ohne Inset, räumt sich nach `life` selbst ab.
+function AuroraFX.speedLines(count, life)
+	if AuroraFX.reducedMotion then return end
+	local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	if not pg then return end
+	local sg = Instance.new("ScreenGui")
+	sg.Name = "UP_AuroraScreen"
+	sg.IgnoreGuiInset = true
+	sg.ResetOnSpawn = false
+	sg.DisplayOrder = 5
+	sg.Parent = pg
+	Debris:AddItem(sg, life + 0.1)
+	local rng = Random.new()
+	for i = 1, count do
+		local angle = (i / count) * 360 + rng:NextNumber(-6, 6)
+		local rad = math.rad(angle)
+		local dir = Vector2.new(math.cos(rad), math.sin(rad))
+		local holder = Instance.new("Frame")
+		holder.AnchorPoint = Vector2.new(0.5, 0.5)
+		holder.BackgroundTransparency = 1
+		holder.Size = UDim2.fromScale(0, 0)
+		holder.Position = UDim2.fromScale(0.5 + dir.X * 0.26, 0.5 + dir.Y * 0.26)
+		holder.Rotation = angle
+		holder.Parent = sg
+		local line = Instance.new("Frame")
+		line.AnchorPoint = Vector2.new(0.5, 0.5)
+		line.BorderSizePixel = 0
+		line.Size = UDim2.fromOffset(rng:NextInteger(220, 420), rng:NextInteger(3, 8))
+		line.BackgroundColor3 = i % 3 == 0 and GREEN or WHITE
+		line.BackgroundTransparency = 0.15
+		line.Parent = holder
+		TweenService:Create(holder, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Position = UDim2.fromScale(0.5 + dir.X * 0.75, 0.5 + dir.Y * 0.75) }):Play()
+		TweenService:Create(line, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 }):Play()
+	end
+end
+
 local function charOf(userId)
 	local plr = Players:GetPlayerByUserId(userId)
 	return plr and plr.Character, plr
@@ -1584,25 +1628,40 @@ function AuroraFX.kick(userId, ball)
 	end
 	if not ball then return end
 	local life = 1.1
-	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(3.4, 3.4, 3.4), Color = WHITE, Transparency = 0.25,
+	-- Lichtkern: kleiner leuchtender Kern + weicher Halo (beide halbtransparent, Bloom macht das Leuchten),
+	-- statt einer undurchsichtigen Kugel. Spur am Kern, Punktlicht färbt Rasen und Spieler.
+	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(2.1, 2.1, 2.1), Color = Color3.fromRGB(210, 255, 230),
+		Transparency = 0.15, CFrame = ball.CFrame }, life + 0.1)
+	local halo = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(4.6, 4.6, 4.6), Color = GREEN, Transparency = 0.72,
 		CFrame = ball.CFrame }, life + 0.1)
-	local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0, 0.9, 0); a0.Parent = core
-	local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(0, -0.9, 0); a1.Parent = core
+	local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0, 1.1, 0); a0.Parent = core
+	local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(0, -1.1, 0); a1.Parent = core
 	local trail = Instance.new("Trail")
 	trail.Attachment0, trail.Attachment1 = a0, a1
-	trail.Lifetime = 0.35
+	trail.Lifetime = 0.4
 	trail.LightEmission = 1
-	trail.Color = ColorSequence.new(GREEN, CYAN)
-	trail.Transparency = NumberSequence.new(0.1, 1)
+	trail.FaceCamera = true
+	trail.WidthScale = NumberSequence.new(1, 0.2)
+	trail.Color = ColorSequence.new(WHITE, CYAN)
+	trail.Transparency = NumberSequence.new(0.05, 1)
 	trail.Parent = core
-	local glow = Instance.new("PointLight"); glow.Color = GREEN; glow.Range = 16; glow.Brightness = 3; glow.Parent = core
-	TweenService:Create(core, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(1.6, 1.6, 1.6), Transparency = 0.8 }):Play()
+	local glow = Instance.new("PointLight"); glow.Color = GREEN; glow.Range = 22; glow.Brightness = 6; glow.Parent = core
+	TweenService:Create(core, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(1.4, 1.4, 1.4), Transparency = 0.7 }):Play()
+	TweenService:Create(halo, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(2.4, 2.4, 2.4), Transparency = 1 }):Play()
+	TweenService:Create(glow, TweenInfo.new(life), { Brightness = 0 }):Play()
+	-- Impact-Blitz am Kontaktpunkt: kurz aufblähende helle Kugel (0,2 s)
+	local burst = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(2, 2, 2), Color = WHITE, Transparency = 0.3,
+		CFrame = ball.CFrame }, 0.25)
+	TweenService:Create(burst, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(own and 16 or 10, own and 16 or 10, own and 16 or 10), Transparency = 1 }):Play()
 	local follow
 	follow = RunService.RenderStepped:Connect(function()
 		if not core.Parent or not ball.Parent then follow:Disconnect() return end
 		core.CFrame = ball.CFrame
+		halo.CFrame = ball.CFrame
 	end)
 	task.delay(life, function() if follow.Connected then follow:Disconnect() end end)
+	if own then AuroraFX.speedLines(36, 0.45) end
 
 	local origin = root and root.Position or ball.Position
 	local forward = root and Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit or Vector3.new(1, 0, 0)

@@ -103,7 +103,8 @@ end
 
 -- Banden (Glas, Lücke für Tore)
 -- SmoothPlastic statt Glass: Glass blendet dahinterliegende SurfaceGuis (LED-Banden) aus
-local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.85, Color = Color3.fromRGB(200, 230, 255) }
+-- Transparenz 0.96: unter Nachtlicht würde eine sichtbarere Bande als heller Schleier über dem Feld liegen
+local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.96, Color = Color3.fromRGB(200, 230, 255) }
 local function wall(size, pos)
 	local p = part({ Name = "Wall", Size = size, Position = pos }, walls)
 	for k, val in pairs(glass) do p[k] = val end
@@ -130,7 +131,7 @@ local a1 = new("Attachment", { Position = Vector3.new(0, -0.4, 0) }, ball)
 new("Trail", { Attachment0 = a0, Attachment1 = a1, Lifetime = 0.25, Transparency = NumberSequence.new(0.4, 1) }, ball)
 
 -- Lobby (schwebt über der Seitenlinie, Blick aufs Feld)
-local LC = Vector3.new(0, 100, -95)
+local LC = Vector3.new(0, 70, -240) -- hinter der Außenwand des SPECTRA DOME: vom Spielfeld aus nicht sichtbar
 part({ Name = "Floor", Size = Vector3.new(50, 2, 40), Position = LC, Material = Enum.Material.Slate, Color = Color3.fromRGB(40, 44, 52) }, lobby)
 for _, w in ipairs({
 	{ Vector3.new(50, 8, 1), Vector3.new(0, 5, -20.5) },
@@ -211,24 +212,25 @@ for _, side in ipairs({ -1, 1 }) do
 	end
 end
 
--- Atmosphaere: Abendspiel unter Flutlicht
+-- Atmosphaere: Nachtspiel in der Halle – dunkler, blauer Himmel, LED-Bänder leuchten über Bloom,
+-- das Feld bleibt über das Umgebungslicht satt grün lesbar
 local Lighting = game:GetService("Lighting")
 for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	local o = Lighting:FindFirstChild(n)
 	if o then o:Destroy() end
 end
 pcall(function()
-	Lighting.ClockTime = 17.6
-	Lighting.Brightness = 2.6
-	Lighting.OutdoorAmbient = Color3.fromRGB(150, 160, 185)
-	Lighting.Ambient = Color3.fromRGB(70, 80, 105)
-	Lighting.EnvironmentDiffuseScale = 0.5
-	Lighting.EnvironmentSpecularScale = 0.5
+	Lighting.ClockTime = 20.3
+	Lighting.Brightness = 1.5
+	Lighting.OutdoorAmbient = Color3.fromRGB(120, 140, 185)
+	Lighting.Ambient = Color3.fromRGB(60, 72, 120)
+	Lighting.EnvironmentDiffuseScale = 0.6
+	Lighting.EnvironmentSpecularScale = 0.8
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.22, Offset = 0.1, Color = Color3.fromRGB(150, 175, 230),
-	Decay = Color3.fromRGB(70, 90, 160), Glare = 0.3, Haze = 1 }, Lighting)
-new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.5, Size = 28, Threshold = 1.7 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.04, Contrast = 0.12, Saturation = 0.12, TintColor = Color3.fromRGB(255, 250, 244) }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.26, Offset = 0.1, Color = Color3.fromRGB(40, 70, 170),
+	Decay = Color3.fromRGB(20, 30, 90), Glare = 0.4, Haze = 1.4 }, Lighting)
+new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.9, Size = 30, Threshold = 1.05 }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.05, Contrast = 0.16, Saturation = 0.3, TintColor = Color3.fromRGB(228, 236, 255) }, Lighting)
 
 end
 

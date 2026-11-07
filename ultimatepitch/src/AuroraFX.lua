@@ -151,6 +151,45 @@ local function cameraPush(amount)
 	end)
 end
 
+-- Bildschirm-Speedlines (nur Schütze, aus bei Reduced Motion): radiale Streifen vom Bildrand zur Mitte hin,
+-- die nach außen wegschießen. Eigene ScreenGui ohne Inset, räumt sich nach `life` selbst ab.
+function AuroraFX.speedLines(count, life)
+	if AuroraFX.reducedMotion then return end
+	local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	if not pg then return end
+	local sg = Instance.new("ScreenGui")
+	sg.Name = "UP_AuroraScreen"
+	sg.IgnoreGuiInset = true
+	sg.ResetOnSpawn = false
+	sg.DisplayOrder = 5
+	sg.Parent = pg
+	Debris:AddItem(sg, life + 0.1)
+	local rng = Random.new()
+	for i = 1, count do
+		local angle = (i / count) * 360 + rng:NextNumber(-6, 6)
+		local rad = math.rad(angle)
+		local dir = Vector2.new(math.cos(rad), math.sin(rad))
+		local holder = Instance.new("Frame")
+		holder.AnchorPoint = Vector2.new(0.5, 0.5)
+		holder.BackgroundTransparency = 1
+		holder.Size = UDim2.fromScale(0, 0)
+		holder.Position = UDim2.fromScale(0.5 + dir.X * 0.26, 0.5 + dir.Y * 0.26)
+		holder.Rotation = angle
+		holder.Parent = sg
+		local line = Instance.new("Frame")
+		line.AnchorPoint = Vector2.new(0.5, 0.5)
+		line.BorderSizePixel = 0
+		line.Size = UDim2.fromOffset(rng:NextInteger(220, 420), rng:NextInteger(3, 8))
+		line.BackgroundColor3 = i % 3 == 0 and GREEN or WHITE
+		line.BackgroundTransparency = 0.15
+		line.Parent = holder
+		TweenService:Create(holder, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Position = UDim2.fromScale(0.5 + dir.X * 0.75, 0.5 + dir.Y * 0.75) }):Play()
+		TweenService:Create(line, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 }):Play()
+	end
+end
+
 local function charOf(userId)
 	local plr = Players:GetPlayerByUserId(userId)
 	return plr and plr.Character, plr
@@ -191,25 +230,40 @@ function AuroraFX.kick(userId, ball)
 	end
 	if not ball then return end
 	local life = 1.1
-	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(3.4, 3.4, 3.4), Color = WHITE, Transparency = 0.25,
+	-- Lichtkern: kleiner leuchtender Kern + weicher Halo (beide halbtransparent, Bloom macht das Leuchten),
+	-- statt einer undurchsichtigen Kugel. Spur am Kern, Punktlicht färbt Rasen und Spieler.
+	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(2.1, 2.1, 2.1), Color = Color3.fromRGB(210, 255, 230),
+		Transparency = 0.15, CFrame = ball.CFrame }, life + 0.1)
+	local halo = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(4.6, 4.6, 4.6), Color = GREEN, Transparency = 0.72,
 		CFrame = ball.CFrame }, life + 0.1)
-	local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0, 0.9, 0); a0.Parent = core
-	local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(0, -0.9, 0); a1.Parent = core
+	local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0, 1.1, 0); a0.Parent = core
+	local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(0, -1.1, 0); a1.Parent = core
 	local trail = Instance.new("Trail")
 	trail.Attachment0, trail.Attachment1 = a0, a1
-	trail.Lifetime = 0.35
+	trail.Lifetime = 0.4
 	trail.LightEmission = 1
-	trail.Color = ColorSequence.new(GREEN, CYAN)
-	trail.Transparency = NumberSequence.new(0.1, 1)
+	trail.FaceCamera = true
+	trail.WidthScale = NumberSequence.new(1, 0.2)
+	trail.Color = ColorSequence.new(WHITE, CYAN)
+	trail.Transparency = NumberSequence.new(0.05, 1)
 	trail.Parent = core
-	local glow = Instance.new("PointLight"); glow.Color = GREEN; glow.Range = 16; glow.Brightness = 3; glow.Parent = core
-	TweenService:Create(core, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(1.6, 1.6, 1.6), Transparency = 0.8 }):Play()
+	local glow = Instance.new("PointLight"); glow.Color = GREEN; glow.Range = 22; glow.Brightness = 6; glow.Parent = core
+	TweenService:Create(core, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(1.4, 1.4, 1.4), Transparency = 0.7 }):Play()
+	TweenService:Create(halo, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(2.4, 2.4, 2.4), Transparency = 1 }):Play()
+	TweenService:Create(glow, TweenInfo.new(life), { Brightness = 0 }):Play()
+	-- Impact-Blitz am Kontaktpunkt: kurz aufblähende helle Kugel (0,2 s)
+	local burst = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.new(2, 2, 2), Color = WHITE, Transparency = 0.3,
+		CFrame = ball.CFrame }, 0.25)
+	TweenService:Create(burst, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(own and 16 or 10, own and 16 or 10, own and 16 or 10), Transparency = 1 }):Play()
 	local follow
 	follow = RunService.RenderStepped:Connect(function()
 		if not core.Parent or not ball.Parent then follow:Disconnect() return end
 		core.CFrame = ball.CFrame
+		halo.CFrame = ball.CFrame
 	end)
 	task.delay(life, function() if follow.Connected then follow:Disconnect() end end)
+	if own then AuroraFX.speedLines(36, 0.45) end
 
 	local origin = root and root.Position or ball.Position
 	local forward = root and Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit or Vector3.new(1, 0, 0)
