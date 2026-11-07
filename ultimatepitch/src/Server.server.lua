@@ -735,7 +735,10 @@ local function cleanup()
 	resetBall()
 end
 
+-- Lebenszeichen und Generation der Spielschleife (siehe Watchdog unten an der Hauptschleife)
+local loopBeat, loopGen = os.clock(), 0
 local function runMatch()
+	local myGen = loopGen
 	setupTeams()
 	scores = { Rot = 0, Blau = 0 }
 	updateScore()
@@ -750,6 +753,8 @@ local function runMatch()
 	sfx("Whistle")
 	while true do
 		local dt = task.wait(0.1)
+		if myGen ~= loopGen then return end -- Watchdog hat neu gestartet: diesen alten Match-Thread beenden
+		loopBeat = os.clock()
 		if humanCount() == 0 then break end
 		if pendingGoal then
 			local t = pendingGoal
@@ -1029,24 +1034,48 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 ---------------------------------------------------------------- Hauptschleife
+-- Die Spielschleife läuft in eigenem Thread mit Generationszähler. Ein Watchdog startet sie neu, wenn sie
+-- 60 s kein Lebenszeichen gibt. Anlass: In Studio hat ein „Script timeout“ (Studio-Hänger) den einzigen
+-- Schleifen-Thread beendet; das Spiel blieb danach dauerhaft in „Anpfiff in 1s“ stehen.
 resetBall()
-while true do
-	setPhase("Lobby")
-	State:SetAttribute("TimeLeft", 0)
-	if #Players:GetPlayers() < CFG.MinPlayers then
-		msg("Warte auf Spieler …")
-		repeat task.wait(1) until #Players:GetPlayers() >= CFG.MinPlayers
-	end
-	setPhase("Intermission")
-	for t = CFG.Intermission, 1, -1 do
-		State:SetAttribute("TimeLeft", t)
-		task.wait(1)
-	end
-	if #Players:GetPlayers() >= CFG.MinPlayers then
-		local ok, err = pcall(runMatch)
-		if not ok then
-			warn("[UltimatePitch] " .. tostring(err))
-			pcall(cleanup)
+local function gameLoop(gen)
+	while gen == loopGen do
+		loopBeat = os.clock()
+		setPhase("Lobby")
+		State:SetAttribute("TimeLeft", 0)
+		if #Players:GetPlayers() < CFG.MinPlayers then
+			msg("Warte auf Spieler …")
+			repeat task.wait(1); loopBeat = os.clock() until #Players:GetPlayers() >= CFG.MinPlayers or gen ~= loopGen
+		end
+		if gen ~= loopGen then return end
+		setPhase("Intermission")
+		for t = CFG.Intermission, 1, -1 do
+			State:SetAttribute("TimeLeft", t)
+			task.wait(1)
+			loopBeat = os.clock()
+		end
+		if #Players:GetPlayers() >= CFG.MinPlayers and gen == loopGen then
+			local ok, err = pcall(runMatch)
+			if not ok then
+				warn("[UltimatePitch] " .. tostring(err))
+				pcall(cleanup)
+			end
 		end
 	end
 end
+local function startLoop()
+	loopGen += 1
+	loopBeat = os.clock()
+	task.spawn(gameLoop, loopGen)
+end
+startLoop()
+task.spawn(function()
+	while true do
+		task.wait(5)
+		if os.clock() - loopBeat > 60 then -- großzügig: Bot-Aufbau beim Anstoß lädt Avatare
+			warn("[UltimatePitch] Spielschleife ohne Lebenszeichen – Neustart")
+			pcall(cleanup)
+			startLoop()
+		end
+	end
+end)
