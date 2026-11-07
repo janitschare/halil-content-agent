@@ -23,6 +23,30 @@ Kein erneuter Codex-Lauf: nur P2-Befunde (Bridge-Regel: Wiederholung nur nach P1
 - **Lighting:** `Lighting.Technology` ist seit Unified Lighting (Roblox, Jan. 2025) durch `LightingStyle` + `PrioritizeLightingQuality` ersetzt; die Place stand auf `Soft`. Jetzt `Realistic`, `PrioritizeLightingQuality = false` (Rojo-Projekt, beide Builder; in Studio gesetzt). Studio-A/B in derselben Sitzung: Soft 53,4 FPS / P95 26,0 ms, Realistic 54,2 FPS / P95 24,4 ms – kein Mehraufwand. Die absolute Bildrate lag in dieser Sitzung höher als bei der früheren Messung (26,9 FPS); Bedingungen (Fenster, Kamera) unterschieden sich, daher keine Aussage über eine Verbesserung.
 - **2-Client-KickAnim (StudioTestService, 2 simulierte Clients):** 4 Läufe. Belastbar aus Lauf 3: Client 1 empfing über das Netzwerk 27 KickAnim-Ereignisse (Bots), 19 mit sichtbarer Hüftbewegung, 0 Formatfehler. **Nicht belegt:** Endbericht von Client 2 und Pass eines menschlichen Spielers (`passRequests = 0`; in Lauf 4 erreichten beide Sonden das Startsignal nicht). Ursache ungeklärt, bewusst nicht weiter in Schleife untersucht. Das neue strenge Harness würde diese Läufe rot melden.
 
+## Nachtrag: 2-Client-KickAnim-Fehlersuche (2026-11-07)
+
+**Ursache der früheren Fehlschläge:** Die beiden StudioTestService-Clients liefen auf dem Test-PC (i5-3230M/HD 4000) im
+Hintergrund mit nur ~6 FPS. Das Startsignal kam erst nach 21–41 s an, die Endberichte ~30 s nach dem Stoppsignal –
+länger als die alten Harness-Fenster (sofortiger Start, 8 bzw. 20 s Wartezeit). Belegt durch Zeitstempel und
+gemessene Client-FPS. Harness wartet jetzt bis 90 s auf beide Clients und bis 60 s auf die Endberichte.
+
+| Lauf | Client-FPS | KickAnim-Ereignisse | „animiert“ (> 0,3 rad) | Pass des anderen Spielers | Bewertung |
+|---|---|---|---|---|---|
+| A, Kickanimation an | 5,6 / 6,1 | 58 / 58 | 55 / 57 | Spieler 1: 9 Pass-Anfragen, 5 vom Server angenommen; Client 2 sah 5/5 | gültig |
+| B, Negativkontrolle (Kickanimation aus) | 12,3 / 6,0 | 87 / 87 | 37 / 38 | 14 Anfragen; Client 2 sah 10/10 Ereignisse, ebenfalls „animiert“ | gültig |
+| C, D (Wiederholung mit Kicksignatur) | 0,0–0,5 | – | – | – | **ungültig**, Clients renderten nicht |
+| 2 weitere | – | – | – | – | ohne Ergebnis bzw. ohne Spieler (Studio-Start fehlgeschlagen) |
+
+**Bewertung:**
+- Belegt: Das Ereignis `KickAnim` kommt auf beiden Clients vollständig und fehlerfrei an (58/58, 87/87), auch für Pässe
+  eines menschlichen Spielers (Server-Pfad Pass → `kickBall(…, char)` → `FireAllClients`).
+- Belegt: Mit Kickanimation sind 95–98 % der Ereignisse über der 0,3-rad-Schwelle, ohne Kickanimation 43–44 %. Die
+  Animation wirkt also messbar auf beiden Clients.
+- **Nicht ausreichend belegt:** Dass jede einzelne Kickpose auf dem anderen Client sichtbar ist. Die 0,3-Schwelle
+  trennt nicht sauber (Codex-Hinweis bestätigt; Laufanimation allein erreicht sie). Die neue Kennzahl
+  „Kicksignatur“ (> 1,1 rad) ist eingebaut, aber wegen eingefrorener Clients noch nicht gegen die Negativkontrolle
+  validiert. Das Harness bewertet jetzt die Kicksignatur und erklärt Läufe mit Client-FPS < 2 für ungültig.
+
 ## Offen
 - 2-Client: Pass eines Spielers auf dem jeweils anderen Client, Negativkontrolle, Respawn/Aurora-Überlappung.
 - Sound-Provenienz für eine spätere öffentliche Veröffentlichung final prüfen (ProSoundEffects-Bibliothek im Creator Store).

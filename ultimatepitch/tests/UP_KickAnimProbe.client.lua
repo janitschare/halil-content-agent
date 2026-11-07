@@ -22,9 +22,13 @@ local AuroraFX = require(me:WaitForChild("PlayerScripts"):WaitForChild("Ultimate
 
 report:FireServer("req", "ok")
 while not folder:GetAttribute("Start") do folder:GetAttributeChangedSignal("Start"):Wait() end
+-- Negativkontrolle: Kickanimation lokal abschalten; die Laufanimation allein darf keine Kicksignatur ergeben
+if folder:GetAttribute("NegControl") then AuroraFX.quickKick = function() end end
 report:FireServer("go", tostring(folder:GetAttribute("Passer")) .. "/" .. me.Name)
 
-local stats = { total = 0, animated = 0, bots = 0, own = 0, other = 0, otherAnimated = 0, errors = 0 }
+-- animiert: Hüftwinkel > 0,3 rad (grob; Negativkontrolle zeigte ~43 % auch ohne Kick durch die Laufanimation)
+-- kicksignatur: Hüftwinkel > 1,1 rad (Kickpose schwingt bis 1,4 rad nach vorn; noch nicht gegen Negativkontrolle validiert)
+local stats = { total = 0, animated = 0, bots = 0, own = 0, other = 0, otherAnimated = 0, errors = 0, sig = 0, otherSig = 0 }
 local function angle(cf)
 	local x, y, z = cf:ToEulerAnglesXYZ()
 	return math.max(math.abs(x), math.abs(y), math.abs(z))
@@ -45,6 +49,10 @@ local conn = Effect.OnClientEvent:Connect(function(kind, _, arg)
 		maxA = math.max(maxA, angle(hip.Transform))
 		if os.clock() - t0 > 0.35 then
 			c:Disconnect()
+			if maxA > 1.1 then
+				stats.sig += 1
+				if isOther then stats.otherSig += 1 end
+			end
 			if maxA > 0.3 then
 				stats.animated += 1
 				if isOther then stats.otherAnimated += 1 end
@@ -72,8 +80,13 @@ if folder:GetAttribute("Passer") == me.Name then
 	end)
 end
 
+-- Bildrate dieses Clients im Messfenster (Diagnose für gedrosselte Hintergrund-Clients)
+local frames, tGo = 0, os.clock()
+local fc = RunService.RenderStepped:Connect(function() frames += 1 end)
 while not folder:GetAttribute("Stop") do folder:GetAttributeChangedSignal("Stop"):Wait() end
 task.wait(0.5)
 conn:Disconnect()
-report:FireServer("kick", string.format("events=%d animiert=%d bots=%d eigen=%d anderer=%d anderer_animiert=%d fehler=%d",
-	stats.total, stats.animated, stats.bots, stats.own, stats.other, stats.otherAnimated, stats.errors))
+fc:Disconnect()
+report:FireServer("kick", string.format("events=%d animiert=%d bots=%d eigen=%d anderer=%d anderer_animiert=%d fehler=%d fps=%.1f kicksignatur=%d anderer_kicksignatur=%d",
+	stats.total, stats.animated, stats.bots, stats.own, stats.other, stats.otherAnimated, stats.errors,
+	frames / math.max(0.1, os.clock() - tGo), stats.sig, stats.otherSig))
