@@ -47,7 +47,7 @@ local conn = Effect.OnClientEvent:Connect(function(kind, _, arg)
 	local c
 	c = RunService.PostSimulation:Connect(function()
 		maxA = math.max(maxA, angle(hip.Transform))
-		if os.clock() - t0 > 0.35 then
+		if os.clock() - t0 > 0.6 then -- 0,6 s: bei gedrosselten Clients mehr Abtastungen (Kickpose dauert ~0,55 s)
 			c:Disconnect()
 			if maxA > 1.1 then
 				stats.sig += 1

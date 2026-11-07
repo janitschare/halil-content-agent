@@ -53,7 +53,7 @@ task.spawn(function()
 	while State:GetAttribute("Phase") ~= "Playing" and os.clock() - t0 < 180 do task.wait(0.5) end
 	local plist = Players:GetPlayers()
 	if #plist < 2 or State:GetAttribute("Phase") ~= "Playing" then
-		finish({ ok = false, why = "kein Match mit 2 Spielern", players = #plist })
+		finish({ ok = false, status = "INVALID", why = "Umgebung: kein Match mit 2 Spielern", players = #plist })
 		return
 	end
 	local names = { plist[1].Name, plist[2].Name }
@@ -64,6 +64,15 @@ task.spawn(function()
 	folder:SetAttribute("Start", true)
 	local bothGo = waitFor(names, ":go", 90)
 	local goWait = os.clock() - tStart
+	if not bothGo then
+		-- Fail-fast: ohne beide bereiten Clients kein Ball-Feed und kein Warten auf Endberichte
+		folder:SetAttribute("Stop", true)
+		local result = { ok = false, status = "INVALID", why = "Umgebung: nicht beide Clients nach 90 s bereit",
+			goWait = string.format("%.1f", goWait) }
+		for k, v in pairs(arrived) do result["t_" .. k] = v end
+		finish(result)
+		return
+	end
 	local ball = workspace.UltimatePitch.Ball
 	local feeds = 0
 	local tEnd = os.clock() + 30
@@ -80,29 +89,50 @@ task.spawn(function()
 	folder:SetAttribute("Stop", true)
 	waitFor(names, ":kick", 60)
 
-	-- Grün nur mit Endberichten beider Spieler, ohne Clientfehler, mit sichtbar animierten Kicks auf
-	-- jedem Client und mindestens einem animierten Kick des jeweils anderen Spielers (Netzwerkpfad).
-	local why = {}
-	if not bothGo then table.insert(why, "nicht beide Clients bereit") end
+	-- Getrennte Urteile (Koordinator-Review 0ca14992):
+	--   status  INVALID = Umgebung untauglich (fehlender Endbericht, Client-FPS < MIN_FPS) – kein Urteil über das Spiel
+	--           FAIL    = Netzwerkpfad nachweislich fehlerhaft;  PASS = Netzwerkpfad belegt
+	--   network PASS/FAIL: KickAnim kommt fehlerfrei an, Pässe des anderen Spielers erreichen den Gegenclient
+	--   signature PASS/FAIL/HOLD: Kicksignatur (> 1,1 rad) nur ab VISUAL_FPS bewertbar, sonst HOLD.
+	--           Positivlauf erwartet Signatur auf beiden Clients, Negativkontrolle erwartet keine.
+	local MIN_FPS, VISUAL_FPS = 2, 30
+	local invalid, fail, sigFail, minFps = {}, {}, {}, math.huge
 	for _, p in ipairs(plist) do
 		local r = reports[p.Name .. ":kick"]
 		if not r then
-			table.insert(why, p.Name .. ": kein Endbericht")
+			table.insert(invalid, p.Name .. ": kein Endbericht")
 		else
-			-- Bewertet wird die Kicksignatur (> 1,1 rad), nicht die grobe 0,3-Schwelle: die Negativkontrolle
-			-- zeigte, dass die Laufanimation allein ~43 % der Ereignisse über 0,3 rad bringt.
-			local sig = tonumber(r:match(" kicksignatur=(%d+)")) or 0
 			local errors = tonumber(r:match("fehler=(%d+)")) or 0
 			local fps = tonumber(r:match("fps=([%d%.]+)")) or 0
-			if fps < 2 then table.insert(why, p.Name .. ": Client gedrosselt (fps " .. fps .. "), Lauf ungültig") end
-			if sig == 0 then table.insert(why, p.Name .. ": keine Kicksignatur") end
-			if errors > 0 then table.insert(why, p.Name .. ": " .. errors .. " Fehler") end
-			if p ~= first and (tonumber(r:match("anderer_kicksignatur=(%d+)")) or 0) == 0 then
-				table.insert(why, p.Name .. ": Pass des anderen Spielers nicht animiert gesehen")
+			local events = tonumber(r:match("events=(%d+)")) or 0
+			local sig = tonumber(r:match(" kicksignatur=(%d+)")) or 0
+			local otherSig = tonumber(r:match("anderer_kicksignatur=(%d+)")) or 0
+			minFps = math.min(minFps, fps)
+			if fps < MIN_FPS then table.insert(invalid, p.Name .. ": Client gedrosselt (fps " .. fps .. ")") end
+			if errors > 0 then table.insert(fail, p.Name .. ": " .. errors .. " Formatfehler") end
+			if events == 0 then table.insert(fail, p.Name .. ": keine KickAnim-Ereignisse") end
+			if p ~= first and passReq > 0 and (tonumber(r:match("anderer=(%d+)")) or 0) == 0 then
+				table.insert(fail, p.Name .. ": kein Pass des anderen Spielers angekommen")
+			end
+			if NEG_CONTROL then
+				if sig > 0 then table.insert(sigFail, p.Name .. ": Kicksignatur trotz abgeschalteter Animation (" .. sig .. ")") end
+			else
+				if sig == 0 then table.insert(sigFail, p.Name .. ": keine Kicksignatur") end
+				if p ~= first and passReq > 0 and otherSig == 0 then
+					table.insert(sigFail, p.Name .. ": Pass des anderen Spielers ohne Kicksignatur")
+				end
 			end
 		end
 	end
-	local result = { ok = #why == 0, why = table.concat(why, "; "), passer = first.Name, feeds = feeds,
+	local status = #invalid > 0 and "INVALID" or (#fail > 0 and "FAIL" or "PASS")
+	local signature = "HOLD (Client-FPS < " .. VISUAL_FPS .. ")"
+	if status ~= "INVALID" and minFps >= VISUAL_FPS then signature = #sigFail > 0 and "FAIL" or "PASS" end
+	local why = {}
+	for _, list in ipairs({ invalid, fail, sigFail }) do
+		for _, w in ipairs(list) do table.insert(why, w) end
+	end
+	local result = { ok = status == "PASS", status = status, network = status == "INVALID" and "-" or status,
+		signature = signature, negControl = NEG_CONTROL, why = table.concat(why, "; "), passer = first.Name, feeds = feeds,
 		passRequests = passReq, goWait = string.format("%.1f", goWait) }
 	for k, v in pairs(reports) do result[k] = v end
 	for k, v in pairs(arrived) do result["t_" .. k] = v end

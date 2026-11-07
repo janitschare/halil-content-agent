@@ -47,6 +47,25 @@ gemessene Client-FPS. Harness wartet jetzt bis 90 s auf beide Clients und bis 60
   „Kicksignatur“ (> 1,1 rad) ist eingebaut, aber wegen eingefrorener Clients noch nicht gegen die Negativkontrolle
   validiert. Das Harness bewertet jetzt die Kicksignatur und erklärt Läufe mit Client-FPS < 2 für ungültig.
 
+## Nachtrag 2: Umsetzung des Koordinator-Reviews zu 0ca14992 (offline, kein neuer Studio-Lauf)
+
+- **Fail-fast:** Melden nicht beide Clients nach 90 s „go“, setzt das Harness sofort „Stop“ und beendet mit `status = INVALID` (kein Ball-Feed, kein 60-s-Warten).
+- **Getrennte Urteile:** `status` INVALID (Umgebung: fehlender Endbericht, Client-FPS < 2) / FAIL / PASS für den Netzwerkpfad; `signature` PASS / FAIL / HOLD – die Kicksignatur wird erst ab 30 Client-FPS bewertet, darunter immer HOLD. Positivlauf erwartet Signatur, Negativkontrolle erwartet keine.
+- **Sonde:** Messfenster je Ereignis 0,6 s statt 0,35 s (mehr Abtastungen bei gedrosselten Clients).
+- **Offline-Prüfung** (Bewertungsblock aus dem Harness-Quelltext mit `loadstring` kompiliert und mit Berichten gespeist, Studio Edit, ohne Spielstart):
+
+| Fall | Daten | status | network | signature |
+|---|---|---|---|---|
+| A Positivlauf | echt (6 FPS) | PASS | PASS | HOLD |
+| B Negativkontrolle | echt (6–12 FPS) | PASS | PASS | HOLD |
+| C eingefrorene Clients | echt (0 FPS) | INVALID | – | HOLD |
+| D fehlender Endbericht | konstruiert | INVALID | – | HOLD |
+| E 40 FPS, Signatur auf beiden | konstruiert | PASS | PASS | PASS |
+| F 40 FPS Negativkontrolle mit Signatur | konstruiert | PASS | PASS | FAIL |
+| G Pass erreicht Gegenclient nicht | konstruiert | FAIL | FAIL | FAIL |
+
+Stand damit: **Netzwerkpfad KickAnim PASS** (Lauf A/B), **Kicksignatur/visuelle Abnahme HOLD** bis zu einem Lauf mit ≥ 30 Client-FPS (stärkerer PC oder Roblox Player), dann genau 1 Positiv- + 1 Negativlauf mit Videoaufnahme.
+
 ## Offen
 - 2-Client: Pass eines Spielers auf dem jeweils anderen Client, Negativkontrolle, Respawn/Aurora-Überlappung.
 - Sound-Provenienz für eine spätere öffentliche Veröffentlichung final prüfen (ProSoundEffects-Bibliothek im Creator Store).
