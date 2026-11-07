@@ -1,5 +1,5 @@
--- UltimatePitch v0.4 · Server (baut die Welt beim Start selbst)
-local VERSION = "0.4"
+-- UltimatePitch v0.5 · Server (baut die Welt beim Start selbst)
+local VERSION = "0.5"
 local GY = 1
 
 local RS = game:GetService("ReplicatedStorage")
@@ -51,8 +51,11 @@ local GRASS = Color3.fromRGB(58, 135, 58)
 local GRASS2 = Color3.fromRGB(70, 152, 68)
 local WHITE = Color3.fromRGB(245, 245, 245)
 
--- Rasen
-part({ Name = "Ground", Size = Vector3.new(200, 1, 140), Position = Vector3.new(0, GY - 0.5, 0), Material = Enum.Material.Grass, Color = GRASS }, field)
+-- Rasen: dunklerer Außenbereich, darauf die Spielfläche mit Mähstreifen
+part({ Name = "Ground", Size = Vector3.new(200, 1, 140), Position = Vector3.new(0, GY - 0.5, 0), Material = Enum.Material.Grass,
+	Color = Color3.fromRGB(42, 104, 46) }, field)
+part({ Name = "Pitch", Size = Vector3.new(166, 0.02, 106), Position = Vector3.new(0, GY + 0.01, 0), Material = Enum.Material.Grass, Color = GRASS,
+	CanCollide = false, CanQuery = false, CanTouch = false }, field)
 for i = 0, 9 do
 	if i % 2 == 0 then
 		part({ Name = "Stripe", Size = Vector3.new(16, 0.04, 100), Position = Vector3.new(-80 + 8 + i * 16, GY + 0.02, 0),
@@ -104,7 +107,7 @@ end
 -- Banden (Glas, Lücke für Tore)
 -- SmoothPlastic statt Glass: Glass blendet dahinterliegende SurfaceGuis (LED-Banden) aus
 -- Transparenz 0.96: unter Nachtlicht würde eine sichtbarere Bande als heller Schleier über dem Feld liegen
-local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.96, Color = Color3.fromRGB(200, 230, 255) }
+local glass = { Material = Enum.Material.SmoothPlastic, Transparency = 0.96, Color = Color3.fromRGB(200, 230, 255), CastShadow = false }
 local function wall(size, pos)
 	local p = part({ Name = "Wall", Size = size, Position = pos }, walls)
 	for k, val in pairs(glass) do p[k] = val end
@@ -172,12 +175,13 @@ new("RemoteEvent", { Name = "Effect" }, shared) -- nur Darstellung: Server melde
 local stands = new("Folder", { Name = "Stands" }, root)
 require(script:WaitForChild("Dome")).build(root, GY, state)
 
--- Sounds (IDs bei Bedarf in Eigenschaften austauschen)
+-- Sounds: freie Soundeffekte von „ProSoundEffects“ aus dem Roblox Creator Store (von Roblox lizenzierte
+-- Bibliothek, kein eigener Upload). Stadionatmosphäre, Torjubel und AURORA-Knall spielt der Client.
 local sounds = new("Folder", { Name = "Sounds" }, shared)
-new("Sound", { Name = "Kick", SoundId = "rbxasset://sounds/swordlunge.wav", Volume = 0.8, PlaybackSpeed = 0.7 }, ball)
-new("Sound", { Name = "Whistle", SoundId = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, PlaybackSpeed = 1.4 }, sounds)
-new("Sound", { Name = "Goal", SoundId = "rbxasset://sounds/victory.wav", Volume = 1 }, sounds)
-new("Sound", { Name = "Save", SoundId = "rbxasset://sounds/button.wav", Volume = 1 }, sounds)
+new("Sound", { Name = "Kick", SoundId = "rbxassetid://9119330229", Volume = 1, RollOffMaxDistance = 220 }, ball) -- Soccer Ball Kicks On Surfaces 41
+new("Sound", { Name = "Whistle", SoundId = "rbxassetid://9118113825", Volume = 0.8 }, sounds) -- Referee Whistle 2
+new("Sound", { Name = "Goal", SoundId = "rbxasset://sounds/victory.wav", Volume = 0.25 }, sounds)
+new("Sound", { Name = "Save", SoundId = "rbxassetid://9119335569", Volume = 1 }, sounds) -- Soccer Goalie Deflection 201
 
 -- Punkte und Eckfahnen
 local function spot(x)
@@ -330,12 +334,18 @@ local function resetBall()
 	Ball.CFrame = CFrame.new(0, CFG.GroundY + 3, 0)
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 end
-local function kickBall(vel)
+-- kicker (optional): Figur, die den Ball spielt. Clients zeigen dazu nur eine Schussanimation ("KickAnim");
+-- Ballrichtung und -tempo setzt allein der Server.
+local function kickBall(vel, kicker)
 	auroraShot = nil -- jede neue Ballaktion beendet die Zuordnung zum letzten AURORA-Schuss
 	local k = Ball:FindFirstChild("Kick")
-	if k then k:Play() end
+	if k then
+		k.PlaybackSpeed = 0.9 + math.min(vel.Magnitude, 120) / 400
+		k:Play()
+	end
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 	Ball.AssemblyLinearVelocity = vel
+	if kicker then EffectEvent:FireAllClients("KickAnim", 0, kicker) end
 end
 -- Berührt eine andere Figur (Spieler oder Bot) den Ball, gehört ein späteres Tor nicht mehr zum AURORA-Schuss
 Ball.Touched:Connect(function(part)
@@ -430,7 +440,57 @@ local function applyKit(char, td, slot)
 		kitLabel(torso, Enum.NormalId.Front, "UP", 0.32, kit.trim, "KitBadge")
 	end
 	char:SetAttribute("KitTeam", td.name)
+	-- Namensschild im Broadcast-Stil (Nummer in Trikotfarbe + Name) statt des Standard-Humanoid-Namens
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end
+	local head = char:FindFirstChild("Head")
+	if head then
+		local old = head:FindFirstChild("UP_Nameplate")
+		if old then old:Destroy() end
+		local plr = Players:GetPlayerFromCharacter(char)
+		local name = plr and plr.DisplayName or char:GetAttribute("DisplayName") or char.Name
+		local bb = Instance.new("BillboardGui")
+		bb.Name = "UP_Nameplate"
+		bb.Size = UDim2.fromOffset(130, 22)
+		bb.StudsOffset = Vector3.new(0, 2.6, 0)
+		bb.MaxDistance = 90
+		bb.LightInfluence = 0
+		bb.Adornee = head
+		local bg = Instance.new("Frame")
+		bg.Size = UDim2.fromScale(1, 1)
+		bg.BackgroundColor3 = Color3.fromRGB(10, 14, 24)
+		bg.BackgroundTransparency = 0.3
+		bg.BorderSizePixel = 0
+		bg.Parent = bb
+		Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 6)
+		local chip = Instance.new("TextLabel")
+		chip.Size = UDim2.new(0, 26, 1, 0)
+		chip.BackgroundColor3 = shirt
+		chip.BorderSizePixel = 0
+		chip.Font = Enum.Font.GothamBlack
+		chip.TextSize = 13
+		chip.TextColor3 = kit.trim
+		chip.Text = slot == 1 and "TW" or tostring(NUMBERS[slot] or slot)
+		chip.Parent = bg
+		Instance.new("UICorner", chip).CornerRadius = UDim.new(0, 6)
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Position = UDim2.fromOffset(30, 0)
+		nameLabel.Size = UDim2.new(1, -34, 1, 0)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.TextSize = 13
+		nameLabel.TextColor3 = Color3.new(1, 1, 1)
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+		nameLabel.Text = string.upper(name)
+		nameLabel.Parent = bg
+		bb.Parent = head
+	end
 end
+
+-- Eigene, frei erfundene Spielernamen für Bots (keine realen Spieler)
+local BOT_NAMES = { "Varga", "Okoro", "Lindqvist", "Moreau", "Tanaka", "Ribeiro", "Novak", "Haddad", "Kowal", "Mensah",
+	"Albers", "Quiroga", "Sato", "Dimitrov", "Ekwueme", "Laine", "Brandt", "Castell", "Oyelaran", "Petrak" }
 
 -- Laufanimationen für Bots: Roblox-Standardanimationen (R15 Idle/Lauf aus dem Standard-Animate-Skript),
 -- kein eigener Upload. Wechsel über Humanoid.Running.
@@ -482,6 +542,7 @@ local function makeBot(td, slot)
 	end)
 	if not ok or not model then model = simpleRig(shirt) end
 	model:SetAttribute("SkinColor", skin)
+	model:SetAttribute("DisplayName", BOT_NAMES[math.random(1, #BOT_NAMES)])
 	applyKit(model, td, slot)
 	local name = (slot == 1 and "TW " or "Bot ") .. td.name .. " " .. slot
 	model.Name = name
@@ -582,7 +643,7 @@ local function botKick(td, m, list)
 	if toGoal.Magnitude < 50 then
 		local aim = Vector3.new(s * (CFG.HalfLength + 4), 0, (math.random() * 2 - 1) * (CFG.GoalHalfWidth - 2))
 		local dir = unit(flat(aim - bp), Vector3.new(s, 0, 0))
-		kickBall(dir * CFG.ShotPower * (0.8 + math.random() * 0.25) + Vector3.new(0, 4 + math.random() * 14, 0))
+		kickBall(dir * CFG.ShotPower * (0.8 + math.random() * 0.25) + Vector3.new(0, 4 + math.random() * 14, 0), m.model)
 		return
 	end
 	-- Pass nach vorn
@@ -601,13 +662,13 @@ local function botKick(td, m, list)
 	if best and math.random() < 0.7 then
 		local target = best.root.Position + Vector3.new(s * 5, 0, 0)
 		local d = flat(target - bp)
-		kickBall(unit(d, Vector3.new(s, 0, 0)) * math.clamp(d.Magnitude * 1.4, 35, 75) + Vector3.new(0, 3, 0))
+		kickBall(unit(d, Vector3.new(s, 0, 0)) * math.clamp(d.Magnitude * 1.4, 35, 75) + Vector3.new(0, 3, 0), m.model)
 		return
 	end
 	-- Dribbeln
 	local dir = unit(toGoal, Vector3.new(s, 0, 0))
 	dir = (CFrame.Angles(0, (math.random() - 0.5) * 0.8, 0) * dir)
-	kickBall(dir * 30 + Vector3.new(0, 1, 0))
+	kickBall(dir * 30 + Vector3.new(0, 1, 0), m.model)
 end
 
 local function keeper(td, m, bp)
@@ -632,7 +693,7 @@ local function keeper(td, m, bp)
 		local chance = speed > 70 and 0.6 or (speed > 40 and 0.8 or 0.97)
 		if rel.Y > 1.5 then m.hum.Jump = true end
 		if math.random() < chance then
-			kickBall(Vector3.new(s * 75, 30, (math.random() * 2 - 1) * 35))
+			kickBall(Vector3.new(s * 75, 30, (math.random() * 2 - 1) * 35), m.model)
 			if speed > 40 then msg("Parade! TW " .. td.name); sfx("Save") end
 		end
 	end
@@ -839,7 +900,7 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, arg)
 	end
 	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td.sign, 0, 0))
 	if kind == "Pass" then
-		kickBall(look * CFG.PassPower + Vector3.new(0, 3, 0))
+		kickBall(look * CFG.PassPower + Vector3.new(0, 3, 0), char)
 	elseif kind == "Shot" then
 		-- Ladung = serverseitig gemessene Haltedauer seit "ChargeStart"; ein mitgeschickter Wert wird ignoriert
 		local began = chargeStart[plr]
@@ -849,7 +910,7 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, arg)
 			return
 		end
 		local pw = math.clamp((now - began) / CFG.ChargeTime, 0, 1)
-		kickBall(look * (CFG.ShotMin + (CFG.ShotMax - CFG.ShotMin) * pw) + Vector3.new(0, 6 + 30 * pw, 0))
+		kickBall(look * (CFG.ShotMin + (CFG.ShotMax - CFG.ShotMin) * pw) + Vector3.new(0, 6 + 30 * pw, 0), char)
 	else
 		-- AURORA BREAK: Cooldown und Ausdauer serverseitig, dann Anlauf mit gehaltenem Ball bis zum Kick-Marker
 		if now < (auroraReady[plr] or 0) then KickEvent:FireClient(plr, "Cooldown") return end

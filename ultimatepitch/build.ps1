@@ -4,7 +4,7 @@
 # Aufruf: powershell -ExecutionPolicy Bypass -File build.ps1
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
-$V = "0.4"
+$V = "0.5"
 $enc = New-Object System.Text.UTF8Encoding($false)
 
 function Src([string]$name) {

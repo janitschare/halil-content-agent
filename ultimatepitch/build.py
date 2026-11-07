@@ -5,7 +5,7 @@ build.ps1 ist das PowerShell-Gegenstück und erzeugt dieselben Dateien.
 """
 from pathlib import Path
 
-V = "0.4"
+V = "0.5"
 here = Path(__file__).parent
 
 

@@ -9,6 +9,7 @@ local Lighting = game:GetService("Lighting")
 
 local AuroraFX = {}
 AuroraFX.reducedMotion = false
+AuroraFX.fxScale = 1 -- Grafikprofil: 1 = Hoch/Mittel, 0.5 = Niedrig (weniger Partikel und Bildschirmstreifen)
 AuroraFX.markers = {} -- Testmesswerte: Zeitpunkte von Anlauf, Kick-Marker und Server-Kick je Schütze
 
 local GREEN = Color3.fromRGB(70, 255, 150)
@@ -151,6 +152,70 @@ local function playKick(char, windup, onMarker, ball)
 end
 AuroraFX.playKick = playKick
 
+-- Normale Pässe/Schüsse/Paraden (Server meldet "KickAnim" mit der Figur): kurze Variante derselben Kickpose.
+-- Läuft keine AURORA-Animation an der Figur, sonst wird nichts überschrieben.
+function AuroraFX.quickKick(char, ball)
+	if not (char and char.Parent) or active[char] then return end
+	playKick(char, 0.1, function() end, ball)
+end
+
+-- Freie Soundeffekte (ProSoundEffects, Roblox Creator Store): AURORA-Knall am Kontaktpunkt, räumlich
+local BOOM_ID = "rbxassetid://9120769331" -- Wind Whoosh Sonic Boom Low End Impact 1
+local function spatialSound(id, pos, volume, speed, life)
+	local holder = fxPart({ Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1, CFrame = CFrame.new(pos) }, life)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = volume
+	s.PlaybackSpeed = speed
+	s.RollOffMinDistance = 30
+	s.RollOffMaxDistance = 400
+	s.Parent = holder
+	s:Play()
+	return s
+end
+
+-- Einblendung für den Schützen: „AURORA BREAK“ schlägt kurz groß ein (bei Reduced Motion ohne Skalierung)
+local function callout()
+	local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	if not pg then return end
+	local sg = Instance.new("ScreenGui")
+	sg.Name = "UP_AuroraCallout"
+	sg.IgnoreGuiInset = true
+	sg.ResetOnSpawn = false
+	sg.DisplayOrder = 6
+	sg.Parent = pg
+	Debris:AddItem(sg, 1.2)
+	local t = Instance.new("TextLabel")
+	t.AnchorPoint = Vector2.new(0.5, 0.5)
+	t.Position = UDim2.fromScale(0.5, 0.3)
+	t.Size = UDim2.new(0.8, 0, 0, 80)
+	t.BackgroundTransparency = 1
+	t.Font = Enum.Font.GothamBlack
+	t.TextScaled = true
+	t.Text = "AURORA BREAK"
+	t.TextColor3 = Color3.new(1, 1, 1)
+	t.Rotation = -3
+	t.Parent = sg
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new(Color3.fromRGB(200, 255, 225), GREEN)
+	g.Rotation = 90
+	g.Parent = t
+	local st = Instance.new("UIStroke")
+	st.Color = Color3.fromRGB(0, 60, 40)
+	st.Thickness = 4
+	st.Parent = t
+	local sc = Instance.new("UIScale")
+	sc.Scale = AuroraFX.reducedMotion and 1 or 1.8
+	sc.Parent = t
+	if not AuroraFX.reducedMotion then
+		TweenService:Create(sc, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+	task.delay(0.6, function()
+		TweenService:Create(t, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+		TweenService:Create(st, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+	end)
+end
+
 local function ringBurst(pos, color, delay, size, life)
 	task.delay(delay, function()
 		local ring = fxPart({ Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 2, 2), Color = color, Transparency = 0.2,
@@ -266,7 +331,7 @@ function AuroraFX.aura(root, own, duration)
 	pe.SpreadAngle = Vector2.new(35, 35)
 	pe.EmissionDirection = Enum.NormalId.Top
 	pe.Acceleration = Vector3.new(0, 10, 0)
-	pe.Rate = own and 90 or 35
+	pe.Rate = (own and 90 or 35) * AuroraFX.fxScale
 	pe.Parent = att
 	task.delay(duration, function() pe.Enabled = false end)
 	Debris:AddItem(att, duration + 0.7)
@@ -317,6 +382,8 @@ function AuroraFX.kick(userId, ball)
 		if own then Players.LocalPlayer:SetAttribute("AuroraKickDelay", m.kickAt - m.windupAt) end
 	end
 	if not ball then return end
+	spatialSound(BOOM_ID, ball.Position, own and 1.2 or 0.9, 1.05, 6)
+	if own then callout() end
 	local life = 1.1
 	-- Lichtkern: kleiner leuchtender Kern + weicher Halo (beide halbtransparent, Bloom macht das Leuchten),
 	-- statt einer undurchsichtigen Kugel. Spur am Kern, Punktlicht färbt Rasen und Spieler.
@@ -351,7 +418,7 @@ function AuroraFX.kick(userId, ball)
 		halo.CFrame = ball.CFrame
 	end)
 	task.delay(life, function() if follow.Connected then follow:Disconnect() end end)
-	if own then AuroraFX.speedLines(36, 0.45) end
+	if own then AuroraFX.speedLines(math.floor(36 * AuroraFX.fxScale), 0.45) end
 
 	local origin = root and root.Position or ball.Position
 	local forward = root and Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit or Vector3.new(1, 0, 0)

@@ -1,0 +1,22 @@
+{
+  "name": "UltimatePitch",
+  "servePort": 34872,
+  "tree": {
+    "$className": "DataModel",
+    "Lighting": { "$properties": { "Technology": "Future" } },
+    "ServerScriptService": {
+      "UltimatePitchServer": {
+        "$path": "src/Server.server.lua",
+        "Dome": { "$path": "src/Dome.lua" }
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "UltimatePitchClient": {
+          "$path": "src/Client.client.lua",
+          "AuroraFX": { "$path": "src/AuroraFX.lua" }
+        }
+      }
+    }
+  }
+}

@@ -152,6 +152,61 @@ function Dome.buildScreen(dome, gy, state)
 	return screen
 end
 
+-- Lichttraversen: zwei Stahlträger längs über dem Feld (z = ±42, 44 Studs über dem Rasen), an der
+-- Dach-Innenkante abgehängt. Je 6 Strahlerköpfe mit SpotLight zielen schräg auf die eigene Feldhälfte
+-- (Abstand ~58 Studs, innerhalb der Lichtreichweite von 60). Die SpotLights tragen das Tag "UP_FieldLight":
+-- Clients schalten Schatten je Grafikprofil lokal ein/aus.
+local GANTRY_Z, GANTRY_H = 42, 44
+local LAMP_X = { -75, -45, -15, 15, 45, 75 }
+function Dome.buildGantries(dome, gy)
+	local folder = Instance.new("Folder")
+	folder.Name = "Gantries"
+	folder.Parent = dome
+	local y = gy + GANTRY_H
+	local edgeA = INNER_A + 20
+	local edgeB = INNER_B + 20
+	for _, side in ipairs({ -1, 1 }) do
+		local z = side * GANTRY_Z
+		local halfLen = edgeA * math.sqrt(1 - (GANTRY_Z / edgeB) ^ 2)
+		deco({ Name = "GantryBeam", Size = Vector3.new(halfLen * 2, 2.2, 2.2), CFrame = CFrame.new(0, y, z),
+			Material = Enum.Material.DiamondPlate, Color = STEEL }, folder)
+		deco({ Name = "GantryChord", Size = Vector3.new(halfLen * 2, 0.5, 0.5), CFrame = CFrame.new(0, y + 2.2, z),
+			Material = Enum.Material.Metal, Color = STEEL }, folder)
+		deco({ Name = "GantryLED", Size = Vector3.new(halfLen * 2 - 4, 0.3, 0.6), CFrame = CFrame.new(0, y - 1.25, z),
+			Material = Enum.Material.Neon, Color = CYAN }, folder)
+		-- Abhängungen zur Dachkante und Fachwerk-Streben
+		for _, sx in ipairs({ -1, 1 }) do
+			local top = Vector3.new(sx * halfLen, ROOF_Y - 0.6, z)
+			local bottom = Vector3.new(sx * (halfLen - 6), y + 1, z)
+			deco({ Name = "GantryHanger", Size = Vector3.new(0.4, 0.4, (top - bottom).Magnitude),
+				CFrame = CFrame.lookAt((top + bottom) / 2, top), Material = Enum.Material.Metal, Color = STEEL }, folder)
+		end
+		for k = -10, 9 do
+			local x0 = k * (halfLen / 10)
+			local a, b = Vector3.new(x0, y + 1.1, z), Vector3.new(x0 + halfLen / 10, y + 2.2, z)
+			deco({ Name = "GantryStrut", Size = Vector3.new(0.3, 0.3, (b - a).Magnitude),
+				CFrame = CFrame.lookAt((a + b) / 2, b), Material = Enum.Material.Metal, Color = STEEL }, folder)
+		end
+		for _, x in ipairs(LAMP_X) do
+			local headPos = Vector3.new(x, y - 2, z)
+			local target = Vector3.new(x * 0.92, gy, -side * 6)
+			local head = deco({ Name = "GantryLamp", Size = Vector3.new(4.2, 2.6, 2),
+				CFrame = CFrame.lookAt(headPos, target), Material = Enum.Material.Metal, Color = Color3.fromRGB(26, 30, 40) }, folder)
+			local lens = deco({ Name = "GantryLens", Size = Vector3.new(3.6, 2, 0.2), CFrame = head.CFrame * CFrame.new(0, 0, -1.05),
+				Material = Enum.Material.Neon, Color = Color3.fromRGB(240, 248, 255) }, folder)
+			local light = Instance.new("SpotLight")
+			light.Face = Enum.NormalId.Front
+			light.Brightness = 2.4
+			light.Range = 60
+			light.Angle = 80
+			light.Color = Color3.fromRGB(236, 244, 255)
+			light.Shadows = true
+			light.Parent = lens
+			CollectionService:AddTag(light, "UP_FieldLight")
+		end
+	end
+end
+
 function Dome.build(root, gy, state)
 	local dome = Instance.new("Folder")
 	dome.Name = "SpectraDome"
@@ -198,6 +253,7 @@ function Dome.build(root, gy, state)
 								Color = FAN_COLORS[rng:NextInteger(1, #FAN_COLORS)], Material = Enum.Material.SmoothPlastic,
 							}, crowd)
 							tagCrowd(fan)
+							CollectionService:AddTag(fan, "UP_CrowdDetail") -- Einzelfiguren: im Profil „Mittel“ aus
 						end
 					end
 				else
@@ -249,21 +305,18 @@ function Dome.build(root, gy, state)
 				CFrame = truss.CFrame * CFrame.new(0, -1.45, 0), Material = Enum.Material.Neon, Color = CYAN }, led)
 			part({ Name = "Column", Size = Vector3.new(2, ROOF_Y - gy, 2), Position = outer + Vector3.new(0, (ROOF_Y + gy) / 2, 0),
 				Material = Enum.Material.Metal, Color = STEEL }, roof)
+			-- Dachkanten-Strahler nur noch als Leuchtkörper: Lichtquellen haben max. 60 Studs Reichweite und
+			-- erreichten das Feld von hier (~140 Studs) nie. Das Feld beleuchten die Traversen (buildGantries).
 			local lampPos = inner + Vector3.new(0, ROOF_Y - 2.6, 0)
-			local lamp = deco({
+			deco({
 				Name = "Floodlight", Size = Vector3.new(5, 1.2, 3),
 				CFrame = CFrame.lookAt(lampPos, Vector3.new(0, gy, 0)),
 				Material = Enum.Material.Neon, Color = Color3.fromRGB(235, 248, 255),
 			}, roof)
-			local light = Instance.new("SpotLight")
-			light.Face = Enum.NormalId.Front
-			light.Brightness = 4
-			light.Range = 60
-			light.Angle = 70
-			light.Color = Color3.fromRGB(220, 240, 255)
-			light.Parent = lamp
 		end
 	end
+
+	Dome.buildGantries(dome, gy)
 
 	-- Spielertunnel hinter der Lücke im Unterrang
 	local tunnelMid = ring((12.5 / SEGMENTS) * math.pi * 2, 8)
