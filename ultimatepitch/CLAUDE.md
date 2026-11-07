@@ -9,6 +9,8 @@ After finishing a cohesive milestone **and committing source changes**, run this
 powershell -NoProfile -File .\tools\peer-review.ps1 -Base HEAD~1
 ```
 
+`-Base` is the commit before the milestone (not blindly `HEAD~1` when the milestone spans several commits). On Windows the script passes the diff to Codex via stdin because the read-only sandbox cannot spawn shell processes there. Keep `tools/peer-review.ps1` saved as UTF-8 **with BOM** (Windows PowerShell 5.1). Reports worth sharing go to `docs/reviews/` after a secret check.
+
 If Codex is not installed/signed in, first follow `docs/CLAUDE_CODEX_BRIDGE_DE.md`. The tool performs one **read-only** `codex exec` review on the committed diff, writes `.peer-review/LATEST_REVIEW.md`, and makes no code edits or GitHub changes.
 
 Read the generated report yourself, fix verified P0/P1 defects in a new commit, run targeted regression, then proceed. Do not run an endless recursive multi-agent review loop; at most one re-review for a corrected milestone unless truly necessary. Never interpret a missing report as a PASS.
