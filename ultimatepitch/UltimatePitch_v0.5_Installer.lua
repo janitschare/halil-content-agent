@@ -1212,9 +1212,14 @@ local function dribble()
 	local ballSpeed = flat(Ball.AssemblyLinearVelocity).Magnitude
 	local trappable = ballSpeed <= CFG.TrapMaxSpeed
 	local best, bestRoot, bestPlr, bestD = nil, nil, nil, CFG.DribbleRange
+	local carried = ballCarrier and ballCarrier.Parent
 	local function consider(model, root, hum, plr, bias)
 		if not canControl(root, hum, bp) then return end
 		if not trappable and model ~= ballCarrier then return end
+		-- Bots nehmen nur freie Bälle automatisch an; einem Ballführer (Gegner wie Mitspieler) nehmen sie den
+		-- Ball ausschließlich über den begrenzten Zweikampf in thinkTeam ab. Menschen haben keine Tackle-Taste:
+		-- sie gewinnen den Ball durch Nähe.
+		if not plr and carried and model ~= ballCarrier then return end
 		local d = flat(bp - root.Position).Magnitude + bias
 		-- Hysterese: der Ballführer behält den Ball etwas länger, damit er bei Richtungswechseln nicht verspringt
 		if model == ballCarrier then d -= 0.6 end
