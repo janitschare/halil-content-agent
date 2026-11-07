@@ -1011,6 +1011,88 @@ local function rowTop(gy, row)
 	return gy + 20 + (row - LOWER_ROWS) * 2.1
 end
 
+-- Großbildwand hinter dem rechten Tor (+X, gegenüber der Anzeigetafel). Zeigt live Spielstand und Zeit;
+-- bei einem serverbestätigten Tor (GoalSeq) für 3 s „GOAL!“ in Teamfarbe, bei AURORA-Toren in Grün.
+-- Nur ereignisgesteuerte Eigenschaftsänderungen (keine Dauer-Tweens auf dem Server).
+function Dome.buildScreen(dome, gy, state)
+	local pos = Vector3.new(INNER_A + 26, gy + 37, 0)
+	local screen = part({ Name = "VideoScreen", Size = Vector3.new(58, 22, 2),
+		CFrame = CFrame.lookAt(pos, Vector3.new(0, gy + 37, 0)), Material = Enum.Material.Metal, Color = Color3.fromRGB(8, 10, 18) }, dome)
+	deco({ Name = "VideoScreenFrame", Size = Vector3.new(59.6, 23.6, 0.4), CFrame = screen.CFrame * CFrame.new(0, 0, 1.2),
+		Material = Enum.Material.Neon, Color = BLUE, Transparency = 0.15 }, dome)
+	part({ Name = "VideoScreenMount", Size = Vector3.new(40, 4, 3), CFrame = screen.CFrame * CFrame.new(0, -13, 2),
+		Material = Enum.Material.Metal, Color = STEEL }, dome)
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 8 -- 464 × 176 px: TextScaled ist auf 100 px begrenzt, so füllt der Spielstand die Wand
+	gui.LightInfluence = 0
+	gui.Brightness = 1.2
+	gui.Parent = screen
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundColor3 = Color3.fromRGB(6, 12, 34)
+	bg.BorderSizePixel = 0
+	bg.Parent = gui
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new(Color3.fromRGB(20, 60, 160), Color3.fromRGB(6, 12, 34))
+	grad.Rotation = 90
+	grad.Parent = bg
+	local function text(name, y, h, size)
+		local l = Instance.new("TextLabel")
+		l.Name = name
+		l.Position = UDim2.fromScale(0, y)
+		l.Size = UDim2.fromScale(1, h)
+		l.BackgroundTransparency = 1
+		l.Font = Enum.Font.GothamBlack
+		l.TextScaled = true -- ohne RichText: RichText + TextScaled verkleinert die Schrift stark
+		l.TextColor3 = Color3.new(1, 1, 1)
+		l.Parent = bg
+		local c = Instance.new("UITextSizeConstraint")
+		c.MaxTextSize = size
+		c.Parent = l
+		return l
+	end
+	local brand = text("Brand", 0.04, 0.16, 60)
+	brand.TextColor3 = CYAN
+	brand.Text = "SPECTRA DOME"
+	local big = text("Big", 0.24, 0.5, 220)
+	local sub = text("Sub", 0.76, 0.18, 70)
+
+	local showingGoalUntil = 0
+	local function live()
+		if os.clock() < showingGoalUntil then return end
+		grad.Color = ColorSequence.new(Color3.fromRGB(20, 60, 160), Color3.fromRGB(6, 12, 34))
+		big.TextColor3 = Color3.new(1, 1, 1)
+		big.Text = string.format("%d : %d", state:GetAttribute("RedScore") or 0, state:GetAttribute("BlueScore") or 0)
+		local t = state:GetAttribute("TimeLeft") or 0
+		sub.Text = string.format("ROT  ·  %d:%02d  ·  BLAU", t // 60, t % 60)
+	end
+	local lastSeq = state:GetAttribute("GoalSeq") or 0
+	state.AttributeChanged:Connect(function(name)
+		if name == "GoalSeq" then
+			local seq = state:GetAttribute("GoalSeq") or 0
+			if seq > lastSeq then
+				local team = state:GetAttribute("LastGoalTeam") or ""
+				local aurora = state:GetAttribute("LastGoalAurora") == true
+				local col = aurora and Color3.fromRGB(10, 160, 110) or (team == "Rot" and Color3.fromRGB(190, 30, 45) or Color3.fromRGB(30, 70, 220))
+				grad.Color = ColorSequence.new(col, Color3.fromRGB(6, 12, 34))
+				big.TextColor3 = Color3.fromRGB(255, 228, 138)
+				big.Text = "GOAL!"
+				sub.Text = (aurora and "AURORA BREAK  ·  " or "") .. string.upper(team)
+				showingGoalUntil = os.clock() + 3
+				task.delay(3.05, live)
+			end
+			lastSeq = seq
+		elseif name == "RedScore" or name == "BlueScore" or name == "TimeLeft" then
+			live()
+		end
+	end)
+	live()
+	return screen
+end
+
 function Dome.build(root, gy, state)
 	local dome = Instance.new("Folder")
 	dome.Name = "SpectraDome"
@@ -1040,8 +1122,15 @@ function Dome.build(root, gy, state)
 				}, crowd, true)
 				tagCrowd(seat)
 				if isLower then
+					-- Dichte Publikumsmasse: durchgehender „Oberkörper“-Streifen je Reihe in gemischter Shirtfarbe,
+					-- darauf einzelne hellere Figuren als Akzente (statt Einzelwürfeln mit Lücken)
+					local body = arcPart(t1, t2, d + 0.2, top + 1.25, 1.1, 1.5, {
+						Name = "CrowdBody", Material = Enum.Material.Fabric,
+						Color = FAN_COLORS[rng:NextInteger(1, #FAN_COLORS)]:Lerp(Color3.fromRGB(30, 34, 50), 0.45),
+					}, crowd, true)
+					tagCrowd(body)
 					for k = 1, 3 do
-						if rng:NextNumber() < 0.75 then
+						if rng:NextNumber() < 0.85 then
 							local a = t1 + (t2 - t1) * (k - 0.5) / 3
 							local pos = ring(a, d) + Vector3.new(0, top + 1.5, 0)
 							local fan = deco({
@@ -1126,9 +1215,10 @@ function Dome.build(root, gy, state)
 
 	-- Anzeigetafel über dem Oberrang hinter dem linken Tor, zeigt Spielstand und Zeit aus State
 	local boardPos = Vector3.new(-(INNER_A + 24), gy + 40, 0)
-	local board = part({ Name = "Scoreboard", Size = Vector3.new(2, 16, 44), CFrame = CFrame.lookAt(boardPos, Vector3.new(0, gy + 40, 0)),
+	-- Breite entlang lokal X, Front (-Z) zeigt zum Feld (vorher 2 × 16 × 44: Tafel stand hochkant zur Seite)
+	local board = part({ Name = "Scoreboard", Size = Vector3.new(44, 16, 2), CFrame = CFrame.lookAt(boardPos, Vector3.new(0, gy + 40, 0)),
 		Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 12, 20) }, dome)
-	local frameGlow = deco({ Name = "ScoreboardFrame", Size = Vector3.new(0.4, 17, 45), CFrame = board.CFrame * CFrame.new(0, 0, -0.9),
+	local frameGlow = deco({ Name = "ScoreboardFrame", Size = Vector3.new(45.2, 17.2, 0.4), CFrame = board.CFrame * CFrame.new(0, 0, 1.2),
 		Material = Enum.Material.Neon, Color = CYAN, Transparency = 0.2 }, led)
 	frameGlow.Name = "ScoreboardFrame"
 	local gui = Instance.new("SurfaceGui")
@@ -1154,6 +1244,7 @@ function Dome.build(root, gy, state)
 	state.AttributeChanged:Connect(refresh)
 	refresh()
 
+	Dome.buildScreen(dome, gy, state)
 	dome.Parent = root
 	return dome
 end
