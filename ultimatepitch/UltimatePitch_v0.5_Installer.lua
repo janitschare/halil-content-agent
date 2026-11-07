@@ -197,6 +197,7 @@ for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0
 	GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false, BallOwner = 0 }) do
 	state:SetAttribute(k, val)
 end
+new("ObjectValue", { Name = "BallCarrier" }, state) -- Figur am Ball (Mensch oder Bot), nur Anzeige
 new("RemoteEvent", { Name = "Kick" }, shared)
 new("RemoteEvent", { Name = "Effect" }, shared) -- nur Darstellung: Server meldet Skill-Phasen an alle Clients
 
@@ -298,7 +299,10 @@ local CFG = {
 	MoveBurst = 12, -- Streckenbudget (Studs) für Netzwerk-Schübe, siehe Bewegungsprüfung
 	-- Ballgefühl: Dribbel-Reichweite, Abstand des Balls vor dem Fuß, Zugstärke, Sperrzeit nach Schuss/Pass
 	DribbleRange = 3.6, DribbleDist = 2.4, DribbleGain = 6, KickGrace = 0.35, DribbleMaxBall = 45,
-	TackleRange = 3, TackleChance = 0.35, TackleRetry = 0.8, -- Bot-Zweikampf gegen dribbelnde Menschen
+	TackleRange = 3, TackleChance = 0.35, TackleRetry = 0.8, -- Bot-Zweikampf gegen den gegnerischen Ballführer
+	TrapMaxSpeed = 75, -- schnellere Bälle (harte Schüsse) lassen sich nicht einfach annehmen
+	-- Bot-KI: Entscheidungstakt am Ball, Schussdistanz, Gegnerdruck (ab dann eher passen)
+	BotDecision = 0.35, BotShootRange = 40, BotPressure = 7,
 	-- AURORA BREAK (Elite-Abschluss, eigene Testwerte)
 	AuroraRange = 6, AuroraCooldown = 12, AuroraStamina = 30, AuroraWindup = 0.3,
 	AuroraSpeed = 128, AuroraLift = 9, AuroraGoalWindow = 2,
@@ -328,6 +332,7 @@ local auroraHold = nil      -- { player, releaseAt } während des Anlaufs: Ball 
 local auroraShot = nil
 local auroraShotSeq = 0
 local ballOwner = nil -- Spieler (Mensch), der den Ball gerade führt; siehe dribble()
+local ballCarrier = nil -- Figur (Mensch oder Bot), die den Ball gerade führt
 local EffectEvent = SHARED:WaitForChild("Effect")
 
 -- Gewollter Server-Teleport: Bezugspunkt der Bewegungsprüfung mitziehen, sonst würde sie zurücksetzen
@@ -666,53 +671,142 @@ local function clampField(p)
 	return Vector3.new(math.clamp(p.X, -78, 78), CFG.GroundY, math.clamp(p.Z, -48, 48))
 end
 
-local function botKick(td, m, list)
-	local now = os.clock()
-	if (botCd[m.model] or 0) > now then return end
-	botCd[m.model] = now + 0.6
+-- KI v2: Bots führen den Ball mit derselben Ballführung wie Menschen (dribble) und entscheiden am Ball
+-- zwischen Schuss, Pass auf einen freien Mitspieler und Dribbling mit Ausweichen. Ohne Ball: Pressing durch
+-- den nächsten Feldspieler, Absicherung durch den zweitnächsten, Freilaufen bei eigenem Ballbesitz.
+
+-- Kleinster Abstand eines Gegners zur Passlinie a -> b (größer = freier Passweg)
+local function laneOpen(a, b, opps)
+	local ab = flat(b - a)
+	local len = ab.Magnitude
+	if len < 1e-3 then return math.huge end
+	local dir = ab / len
+	local best = math.huge
+	for _, o in ipairs(opps) do
+		local ap = flat(o.root.Position - a)
+		local t = math.clamp(ap:Dot(dir), 0, len)
+		best = math.min(best, (ap - dir * t).Magnitude)
+	end
+	return best
+end
+
+local function nearestOpp(pos, opps)
+	local best, bd = nil, math.huge
+	for _, o in ipairs(opps) do
+		local d = flat(o.root.Position - pos).Magnitude
+		if d < bd then best, bd = o, d end
+	end
+	return best, bd
+end
+
+-- Bester freier Mitspieler: Passweg frei, Empfänger ungedeckt, möglichst nach vorn.
+-- Rückpässe nur als Sicherheitspass unter starkem Druck (allowBack) und höchstens 15 Studs zurück.
+local function choosePass(td, m, list, opps, allowBack)
 	local s = td.sign
 	local bp = Ball.Position
-	local goal = Vector3.new(s * CFG.HalfLength, 0, 0)
-	local toGoal = flat(goal - bp)
-	-- Schuss
-	if toGoal.Magnitude < 50 then
-		local aim = Vector3.new(s * (CFG.HalfLength + 4), 0, (math.random() * 2 - 1) * (CFG.GoalHalfWidth - 2))
-		local dir = unit(flat(aim - bp), Vector3.new(s, 0, 0))
-		kickBall(dir * CFG.ShotPower * (0.8 + math.random() * 0.25) + Vector3.new(0, 4 + math.random() * 14, 0), m.model)
-		return
-	end
-	-- Pass nach vorn
 	local best, bestScore = nil, -math.huge
 	for _, o in ipairs(list) do
 		if o ~= m and o.slot ~= 1 then
-			local op = o.root.Position
-			local ahead = (op.X - bp.X) * s
+			local op = o.root.Position + Vector3.new(s * 3, 0, 0) -- leicht in den Lauf spielen
 			local dist = flat(op - bp).Magnitude
-			if ahead > 4 and dist < 60 then
-				local score = ahead - dist * 0.3 + math.random() * 10
-				if score > bestScore then best, bestScore = o, score end
+			local ahead = (op.X - bp.X) * s
+			if dist > 8 and dist < 60 and ahead > (allowBack and -15 or -3) then
+				local lane = laneOpen(bp, op, opps)
+				if lane > 4 then
+					local _, press = nearestOpp(op, opps)
+					local score = ahead * (ahead >= 0 and 0.8 or 2) + math.min(lane, 12) * 1.2 + math.min(press, 15) * 0.8 - dist * 0.1
+					if score > bestScore then best, bestScore = o, score end
+				end
 			end
 		end
 	end
-	if best and math.random() < 0.7 then
-		local target = best.root.Position + Vector3.new(s * 5, 0, 0)
-		local d = flat(target - bp)
-		kickBall(unit(d, Vector3.new(s, 0, 0)) * math.clamp(d.Magnitude * 1.4, 35, 75) + Vector3.new(0, 3, 0), m.model)
-		return
-	end
-	-- Dribbeln
-	local dir = unit(toGoal, Vector3.new(s, 0, 0))
-	dir = (CFrame.Angles(0, (math.random() - 0.5) * 0.8, 0) * dir)
-	kickBall(dir * 30 + Vector3.new(0, 1, 0), m.model)
+	return best
 end
 
-local function keeper(td, m, bp)
+local function passTo(td, m, o)
+	local bp = Ball.Position
+	local target = o.root.Position + Vector3.new(td.sign * 3, 0, 0)
+	local d = flat(target - bp)
+	kickBall(unit(d, Vector3.new(td.sign, 0, 0)) * math.clamp(d.Magnitude * 1.3, 32, 70) + Vector3.new(0, 2, 0), m.model)
+end
+
+-- Schuss ins vom Torwart entferntere Eck
+local function shoot(td, m, opps)
+	local s = td.sign
+	local bp = Ball.Position
+	local kz = 0
+	for _, o in ipairs(opps) do
+		if o.slot == 1 then kz = o.root.Position.Z end
+	end
+	local side = kz > 0 and -1 or 1
+	local aim = Vector3.new(s * (CFG.HalfLength + 4), 0, side * (CFG.GoalHalfWidth - 2.5) + (math.random() - 0.5) * 3)
+	local dir = unit(flat(aim - bp), Vector3.new(s, 0, 0))
+	kickBall(dir * CFG.ShotPower * (0.85 + math.random() * 0.2) + Vector3.new(0, 3 + math.random() * 8, 0), m.model)
+end
+
+-- Gewonnener Zweikampf: Ball zum freien Mitspieler spitzeln, sonst nach vorn
+local function botKick(td, m, list, opps)
+	local now = os.clock()
+	if (botCd[m.model] or 0) > now then return end
+	botCd[m.model] = now + 0.6
+	local o = choosePass(td, m, list, opps)
+	if o then passTo(td, m, o) return end
+	local dir = CFrame.Angles(0, (math.random() - 0.5) * 0.8, 0) * Vector3.new(td.sign, 0, 0)
+	kickBall(dir * 32 + Vector3.new(0, 1, 0), m.model)
+end
+
+-- Bot am Ball: Entscheidung höchstens alle BotDecision Sekunden, dazwischen Dribbling
+local function carryBall(td, m, list, opps)
+	local s = td.sign
+	local root = m.root
+	local bp = Ball.Position
+	local toGoal = flat(Vector3.new(s * CFG.HalfLength, 0, 0) - bp)
+	local _, press = nearestOpp(bp, opps)
+	local now = os.clock()
+	if (botCd[m.model] or 0) <= now then
+		botCd[m.model] = now + CFG.BotDecision
+		local goalDist = toGoal.Magnitude
+		if goalDist < 24 or (goalDist < CFG.BotShootRange and math.abs(bp.Z) < 30 and press > 4) then
+			shoot(td, m, opps)
+			return
+		end
+		if press < CFG.BotPressure then
+			-- unter Druck: Pass nach vorn; nur bei sehr engem Gegner auch Sicherheitspass zurück
+			local o = choosePass(td, m, list, opps, press < 3.5)
+			if o then passTo(td, m, o) return end
+		elseif math.random() < 0.12 then
+			-- gelegentlicher Steilpass, wenn ein Mitspieler deutlich weiter vorn frei ist
+			local o = choosePass(td, m, list, opps)
+			if o and (o.root.Position.X - bp.X) * s > 15 then passTo(td, m, o) return end
+		end
+	end
+	-- Dribbling Richtung Tor; steht ein Gegner im Weg, seitlich ausweichen
+	local dir = unit(toGoal, Vector3.new(s, 0, 0))
+	local opp, od = nearestOpp(root.Position + dir * 6, opps)
+	if opp and od < 9 then
+		local away = flat(root.Position - opp.root.Position)
+		local perp = Vector3.new(-dir.Z, 0, dir.X)
+		dir = unit(dir + perp * ((away:Dot(perp) >= 0) and 0.9 or -0.9), dir)
+	end
+	m.hum:MoveTo(clampField(root.Position + dir * 12))
+end
+
+local function carrierTeam()
+	if not (ballCarrier and ballCarrier.Parent) then return nil end
+	local plr = Players:GetPlayerFromCharacter(ballCarrier)
+	if plr then return plr.Team and plr.Team.Name end
+	return ballCarrier:GetAttribute("Team")
+end
+
+local function keeper(td, m, bp, list, opps)
 	local s = td.sign
 	local gx = -s * CFG.HalfLength
 	local inBox = math.abs(bp.X - gx) < 20 and math.abs(bp.Z) < 22
 	local target
 	if inBox then
-		target = Vector3.new(bp.X, 0, bp.Z)
+		-- torseitig hinter den Ball stellen (statt auf den Ball zu laufen und ihn ins eigene Tor zu schieben)
+		local goalCenter = Vector3.new(gx, 0, 0)
+		target = flat(bp) + unit(flat(goalCenter - bp), Vector3.new(-s, 0, 0)) * 2.5
 	else
 		target = Vector3.new(gx + s * 3, 0, math.clamp(bp.Z * 0.35, -CFG.GoalHalfWidth + 2, CFG.GoalHalfWidth - 2))
 	end
@@ -722,13 +816,20 @@ local function keeper(td, m, bp)
 
 	local rel = bp - m.root.Position
 	local now = os.clock()
-	if flat(rel).Magnitude < 6.5 and rel.Y < 7 and (botCd[m.model] or 0) < now then
+	-- nicht eingreifen, wenn ein eigener Mitspieler den Ball führt
+	if flat(rel).Magnitude < 6.5 and rel.Y < 7 and (botCd[m.model] or 0) < now and carrierTeam() ~= td.name then
 		botCd[m.model] = now + 0.8
 		local speed = Ball.AssemblyLinearVelocity.Magnitude
 		local chance = speed > 70 and 0.6 or (speed > 40 and 0.8 or 0.97)
 		if rel.Y > 1.5 then m.hum.Jump = true end
 		if math.random() < chance then
-			kickBall(Vector3.new(s * 75, 30, (math.random() * 2 - 1) * 35), m.model)
+			-- Spieleröffnung: freien Mitspieler anspielen, sonst weit klären
+			local o = speed <= 40 and choosePass(td, m, list, opps)
+			if o then
+				passTo(td, m, o)
+			else
+				kickBall(Vector3.new(s * 75, 30, (math.random() * 2 - 1) * 35), m.model)
+			end
 			if speed > 40 then msg("Parade! TW " .. td.name); sfx("Save") end
 		end
 	end
@@ -739,49 +840,60 @@ local function thinkTeam(teamName)
 	local s = td.sign
 	local bp = Ball.Position
 	local list = members(teamName)
-	-- Ballbesitz eines Menschen: eigenes Team lässt ihm den Ball (Bots laufen sich frei),
-	-- Gegner dürfen nur aus kurzer Distanz mit begrenzter Erfolgschance tackeln
-	local ownerTeam = ballOwner and ballOwner.Team and ballOwner.Team.Name
-	local teammateHasBall = ownerTeam == teamName
-	local chaser, cd = nil, math.huge
-	if not teammateHasBall then
+	local opps = members(teamName == "Rot" and "Blau" or "Rot")
+	local cTeam = carrierTeam()
+	local weHave = cTeam == teamName
+	local theyHave = cTeam ~= nil and not weHave
+	local ownGoal = Vector3.new(-s * CFG.HalfLength, 0, 0)
+	-- Ohne eigenen Ballbesitz: nächster Feldspieler presst, zweitnächster sichert zwischen Ball und Tor ab
+	local order = {}
+	if not weHave then
 		for _, m in ipairs(list) do
-			if m.slot ~= 1 then
-				local d = flat(m.root.Position - bp).Magnitude
-				if d < cd then chaser, cd = m, d end
-			end
+			if m.slot ~= 1 then table.insert(order, m) end
 		end
+		table.sort(order, function(a, b)
+			return flat(a.root.Position - bp).Magnitude < flat(b.root.Position - bp).Magnitude
+		end)
 	end
+	local presser, cover = order[1], order[2]
 	for _, m in ipairs(list) do
 		if m.e.kind == "bot" then
 			if m.slot == 1 then
-				keeper(td, m, bp)
+				keeper(td, m, bp, list, opps)
+			elseif ballCarrier == m.model then
+				carryBall(td, m, list, opps)
 			else
+				local home = slotPos(td, m.slot)
+				local defender = m.slot <= 3
 				local target
-				if m == chaser then
+				if m == presser then
 					target = bp - Vector3.new(s, 0, 0) * 1.2
+				elseif m == cover and theyHave then
+					target = bp + unit(flat(ownGoal - bp), Vector3.new(-s, 0, 0)) * 12
+				elseif weHave then
+					-- Freilaufen: Verteidiger hinter dem Ball, Stürmer vor dem Ball und in die Breite
+					if defender then
+						target = Vector3.new(bp.X - s * 16, 0, home.Z * 1.2)
+					else
+						target = Vector3.new(bp.X + s * 20, 0, home.Z * 2.2)
+					end
 				else
-					local home = slotPos(td, m.slot)
-					target = Vector3.new(home.X + bp.X * 0.5, 0, home.Z * 0.8 + bp.Z * 0.3)
-					-- Mitspieler am Ball: vor den Ball in Richtung gegnerisches Tor anbieten
-					if teammateHasBall then target += Vector3.new(s * 14, 0, 0) end
+					-- Formation: zwischen Grundposition und Ball, Verteidiger tiefer
+					local pull = defender and 0.35 or 0.55
+					target = Vector3.new(home.X + (bp.X - home.X) * pull, 0, home.Z * 0.9 + bp.Z * 0.3)
 				end
 				m.hum:MoveTo(clampField(target))
-				local rel = bp - m.root.Position
-				local dist = flat(rel).Magnitude
-				if not teammateHasBall and dist < 4.5 and bp.Y < CFG.GroundY + 5 then
-					if ownerTeam then
-						-- Tackling gegen einen dribbelnden Menschen
-						local now = os.clock()
-						if dist < CFG.TackleRange and (botCd[m.model] or 0) <= now then
-							if math.random() < CFG.TackleChance then
-								botKick(td, m, list)
-							else
-								botCd[m.model] = now + CFG.TackleRetry
-							end
+				-- Zweikampf gegen den gegnerischen Ballführer (Mensch oder Bot): nur aus kurzer Distanz,
+				-- begrenzte Erfolgschance, Pause nach Fehlversuch
+				local dist = flat(bp - m.root.Position).Magnitude
+				if theyHave and dist < CFG.TackleRange and bp.Y < CFG.GroundY + 5 then
+					local now = os.clock()
+					if (botCd[m.model] or 0) <= now then
+						if math.random() < CFG.TackleChance then
+							botKick(td, m, list, opps)
+						else
+							botCd[m.model] = now + CFG.TackleRetry
 						end
-					else
-						botKick(td, m, list)
 					end
 				end
 			end
@@ -1070,42 +1182,68 @@ end)
 -- ein ankommender Pass wird dabei auf Führungstempo abgebremst (Ballannahme). Berechnet nur aus Server-
 -- Positionen, der Client sendet dafür nichts. Kurz nach jeder Schuss-/Passaktion (KickGrace) greift es nicht,
 -- damit gespielte Bälle den Fuß verlassen. Bots bleiben bei ihrer Kick-Logik und können den Ball abnehmen.
-local function setOwner(plr)
-	if ballOwner == plr then return end
-	ballOwner = plr
-	State:SetAttribute("BallOwner", plr and plr.UserId or 0)
+-- Ballführer kann ein Mensch oder ein Bot sein: ballCarrier = Figur (Model), ballOwner = Player nur bei Menschen.
+-- Clients sehen den Ballführer über State.BallCarrier (ObjectValue) bzw. State@BallOwner (UserId, 0 = kein Mensch).
+local CarrierValue = State:WaitForChild("BallCarrier")
+local function setCarrier(model, plr)
+	if ballCarrier ~= model then
+		ballCarrier = model
+		CarrierValue.Value = model
+	end
+	if ballOwner ~= plr then
+		ballOwner = plr
+		State:SetAttribute("BallOwner", plr and plr.UserId or 0)
+	end
+end
+local function setOwner(plr) -- Kurzform: Ballführer zurücksetzen
+	if plr == nil then setCarrier(nil, nil) end
+end
+-- Kandidat prüfen: lebende Figur, Ballhöhe passt zu den Füßen (keine Annahme beim Überspringen)
+local function canControl(root, hum, bp)
+	if not (root and hum and hum.Health > 0) then return false end
+	local feetY = root.Position.Y - hum.HipHeight - root.Size.Y / 2
+	return math.abs(bp.Y - (feetY + 1.1)) < 2.5
 end
 local function dribble()
-	if os.clock() - lastBallKickAt < CFG.KickGrace then setOwner(nil) return end
+	if os.clock() - lastBallKickAt < CFG.KickGrace then setCarrier(nil, nil) return end
 	local bp = Ball.Position
-	if bp.Y > CFG.GroundY + 3 then setOwner(nil) return end
-	local best, bestRoot, bestD = nil, nil, CFG.DribbleRange
+	if bp.Y > CFG.GroundY + 3 then setCarrier(nil, nil) return end
+	-- Harte Schüsse lassen sich nicht einfach stoppen (nur der bisherige Ballführer behält den Ball)
+	local ballSpeed = flat(Ball.AssemblyLinearVelocity).Magnitude
+	local trappable = ballSpeed <= CFG.TrapMaxSpeed
+	local best, bestRoot, bestPlr, bestD = nil, nil, nil, CFG.DribbleRange
+	local function consider(model, root, hum, plr, bias)
+		if not canControl(root, hum, bp) then return end
+		if not trappable and model ~= ballCarrier then return end
+		local d = flat(bp - root.Position).Magnitude + bias
+		-- Hysterese: der Ballführer behält den Ball etwas länger, damit er bei Richtungswechseln nicht verspringt
+		if model == ballCarrier then d -= 0.6 end
+		if d < bestD then best, bestRoot, bestPlr, bestD = model, root, plr, d end
+	end
 	for _, plr in ipairs(Players:GetPlayers()) do
-		local td = TEAM[plr.Team and plr.Team.Name]
 		local char = plr.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart")
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		-- Höhenprüfung: Ballmitte höchstens 2,5 Studs über/unter Ballmitte am Boden vor den Füßen
-		-- (verhindert Annahmen beim Überspringen oder von erhöhten Figuren)
-		local feetY = root and hum and (root.Position.Y - hum.HipHeight - root.Size.Y / 2)
-		if td and root and hum and hum.Health > 0 and math.abs(bp.Y - (feetY + 1.1)) < 2.5 then
-			local d = flat(bp - root.Position).Magnitude
-			-- Besitzer behält den Ball etwas länger (Hysterese), damit er bei Richtungswechseln nicht verspringt
-			if plr == ballOwner then d -= 0.6 end
-			if d < bestD then best, bestRoot, bestD = plr, root, d end
+		if TEAM[plr.Team and plr.Team.Name] and char then
+			consider(char, char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid"), plr, -0.3)
 		end
 	end
-	setOwner(best)
+	for _, teamName in ipairs({ "Rot", "Blau" }) do
+		for slot, e in pairs(roster[teamName]) do
+			if e.kind == "bot" and slot ~= 1 and e.model and e.model.Parent then
+				consider(e.model, e.model:FindFirstChild("HumanoidRootPart"), e.model:FindFirstChildOfClass("Humanoid"), nil, 0)
+			end
+		end
+	end
+	setCarrier(best, bestPlr)
 	if not best then return end
-	auroraShot = nil -- Ballannahme durch einen Spieler beendet jeden AURORA-Schuss
+	auroraShot = nil -- Ballannahme beendet jeden AURORA-Schuss
 	local look = unit(flat(bestRoot.CFrame.LookVector), Vector3.new(1, 0, 0))
-	-- Die Figurgeschwindigkeit stammt aus der Physik der (clientbesessenen) Figur und ist damit nicht
-	-- vertrauenswürdig: nur endliche Werte zulassen und auf das serverseitig erlaubte Höchsttempo
-	-- (BaseSpeed × Sprintfaktor) begrenzen; das Ergebnis zusätzlich absolut auf DribbleMaxBall.
+	-- Menschen: Die Figurgeschwindigkeit stammt aus der Physik der (clientbesessenen) Figur und ist damit
+	-- nicht vertrauenswürdig: nur endliche Werte zulassen und auf das serverseitig erlaubte Höchsttempo
+	-- (BaseSpeed × Sprintfaktor) begrenzen; Bots (serverbesessen) auf ihr Lauftempo. Ergebnis absolut ≤ DribbleMaxBall.
 	local runVel = flat(bestRoot.AssemblyLinearVelocity)
 	local runMag = runVel.Magnitude
 	if runMag ~= runMag or runMag == math.huge then runVel = Vector3.zero end -- NaN oder unendlich
-	local allowed = ((bestRoot.Parent and bestRoot.Parent:GetAttribute("BaseSpeed")) or 16) * CFG.SprintFactor
+	local allowed = bestPlr and ((best:GetAttribute("BaseSpeed") or 16) * CFG.SprintFactor) or CFG.KeeperSpeed
 	if runVel.Magnitude > allowed then runVel = runVel.Unit * allowed end
 	local target = Vector3.new(bestRoot.Position.X, bp.Y, bestRoot.Position.Z) + look * CFG.DribbleDist
 	local pull = flat(target - bp) * CFG.DribbleGain
@@ -1797,9 +1935,11 @@ for i = 1, RING_SEGMENTS do
 end
 local ringVisible = false
 RunService.RenderStepped:Connect(function()
-	local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
-	local root = owner and owner.Character and owner.Character:FindFirstChild("HumanoidRootPart")
-	local hum = owner and owner.Character and owner.Character:FindFirstChildOfClass("Humanoid")
+	-- Ballführer = Mensch oder Bot (State.BallCarrier); Teamfarbe über Spielerteam bzw. Bot-Attribut
+	local carrierValue = State:FindFirstChild("BallCarrier")
+	local carrier = carrierValue and carrierValue.Value
+	local root = carrier and carrier.Parent and carrier:FindFirstChild("HumanoidRootPart")
+	local hum = carrier and carrier:FindFirstChildOfClass("Humanoid")
 	if not (root and hum) then
 		if ringVisible then
 			for _, seg in ipairs(ringParts) do seg.Transparency = 1 end
@@ -1808,7 +1948,9 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 	local feet = Vector3.new(root.Position.X, root.Position.Y - hum.HipHeight - root.Size.Y / 2 + 0.06, root.Position.Z)
-	local color = (owner.Team and owner.Team.Name == "Rot") and RED or BLUE
+	local cPlr = Players:GetPlayerFromCharacter(carrier)
+	local cTeam = cPlr and cPlr.Team and cPlr.Team.Name or carrier:GetAttribute("Team")
+	local color = cTeam == "Rot" and RED or BLUE
 	local spin = AuroraFX.reducedMotion and 0 or os.clock() * 1.5 -- bei reduzierter Bewegung steht der Ring
 	for i, seg in ipairs(ringParts) do
 		local a = spin + (i / RING_SEGMENTS) * math.pi * 2
@@ -2206,10 +2348,13 @@ function AuroraFX.startMotion(State)
 		end
 		return list
 	end
-	State:GetAttributeChangedSignal("BallOwner"):Connect(function()
-		local plr = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
-		if plr and plr.Character then receive[plr.Character] = os.clock() end
-	end)
+	-- Ballführer (Mensch oder Bot) aus State.BallCarrier; Annahme-Pose beim Wechsel
+	local carrierValue = State:WaitForChild("BallCarrier", 10)
+	if carrierValue then
+		carrierValue.Changed:Connect(function(model)
+			if model then receive[model] = os.clock() end
+		end)
+	end
 	local lastSeq = State:GetAttribute("GoalSeq") or 0
 	State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
 		local seq = State:GetAttribute("GoalSeq") or 0
@@ -2225,8 +2370,7 @@ function AuroraFX.startMotion(State)
 		local cam = workspace.CurrentCamera
 		local camPos = cam and cam.CFrame.Position or Vector3.zero
 		local now = os.clock()
-		local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
-		local ownerChar = owner and owner.Character
+		local ownerChar = carrierValue and carrierValue.Value
 		for _, char in ipairs(characters()) do
 			local root = char:FindFirstChild("HumanoidRootPart")
 			if root and not active[char] and (root.Position - camPos).Magnitude < MOTION_RANGE then

@@ -170,9 +170,11 @@ for i = 1, RING_SEGMENTS do
 end
 local ringVisible = false
 RunService.RenderStepped:Connect(function()
-	local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
-	local root = owner and owner.Character and owner.Character:FindFirstChild("HumanoidRootPart")
-	local hum = owner and owner.Character and owner.Character:FindFirstChildOfClass("Humanoid")
+	-- Ballführer = Mensch oder Bot (State.BallCarrier); Teamfarbe über Spielerteam bzw. Bot-Attribut
+	local carrierValue = State:FindFirstChild("BallCarrier")
+	local carrier = carrierValue and carrierValue.Value
+	local root = carrier and carrier.Parent and carrier:FindFirstChild("HumanoidRootPart")
+	local hum = carrier and carrier:FindFirstChildOfClass("Humanoid")
 	if not (root and hum) then
 		if ringVisible then
 			for _, seg in ipairs(ringParts) do seg.Transparency = 1 end
@@ -181,7 +183,9 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 	local feet = Vector3.new(root.Position.X, root.Position.Y - hum.HipHeight - root.Size.Y / 2 + 0.06, root.Position.Z)
-	local color = (owner.Team and owner.Team.Name == "Rot") and RED or BLUE
+	local cPlr = Players:GetPlayerFromCharacter(carrier)
+	local cTeam = cPlr and cPlr.Team and cPlr.Team.Name or carrier:GetAttribute("Team")
+	local color = cTeam == "Rot" and RED or BLUE
 	local spin = AuroraFX.reducedMotion and 0 or os.clock() * 1.5 -- bei reduzierter Bewegung steht der Ring
 	for i, seg in ipairs(ringParts) do
 		local a = spin + (i / RING_SEGMENTS) * math.pi * 2

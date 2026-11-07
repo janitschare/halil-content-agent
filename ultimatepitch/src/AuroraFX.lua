@@ -191,10 +191,13 @@ function AuroraFX.startMotion(State)
 		end
 		return list
 	end
-	State:GetAttributeChangedSignal("BallOwner"):Connect(function()
-		local plr = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
-		if plr and plr.Character then receive[plr.Character] = os.clock() end
-	end)
+	-- Ballführer (Mensch oder Bot) aus State.BallCarrier; Annahme-Pose beim Wechsel
+	local carrierValue = State:WaitForChild("BallCarrier", 10)
+	if carrierValue then
+		carrierValue.Changed:Connect(function(model)
+			if model then receive[model] = os.clock() end
+		end)
+	end
 	local lastSeq = State:GetAttribute("GoalSeq") or 0
 	State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
 		local seq = State:GetAttribute("GoalSeq") or 0
@@ -210,8 +213,7 @@ function AuroraFX.startMotion(State)
 		local cam = workspace.CurrentCamera
 		local camPos = cam and cam.CFrame.Position or Vector3.zero
 		local now = os.clock()
-		local owner = Players:GetPlayerByUserId(State:GetAttribute("BallOwner") or 0)
-		local ownerChar = owner and owner.Character
+		local ownerChar = carrierValue and carrierValue.Value
 		for _, char in ipairs(characters()) do
 			local root = char:FindFirstChild("HumanoidRootPart")
 			if root and not active[char] and (root.Position - camPos).Magnitude < MOTION_RANGE then
