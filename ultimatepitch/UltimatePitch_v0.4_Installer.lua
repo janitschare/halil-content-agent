@@ -1600,7 +1600,41 @@ local function charOf(userId)
 	return plr and plr.Character, plr
 end
 
--- Anlauf: Animation + gestaffelte Ringe; volle Effektmenge nur für den eigenen Schützen (FX-Budget)
+-- Aura am Schützen: aufsteigende Leuchtfunken (Standard-Partikeltextur von Roblox, kein externes Asset)
+-- und Lichtzacken rund um den Körper. Räumt sich nach `duration` selbst ab.
+function AuroraFX.aura(root, own, duration)
+	local att = Instance.new("Attachment")
+	att.Name = "UP_AuroraAura"
+	att.Position = Vector3.new(0, -1, 0)
+	att.Parent = root
+	local pe = Instance.new("ParticleEmitter")
+	pe.Color = ColorSequence.new(WHITE, GREEN)
+	pe.LightEmission = 1
+	pe.LightInfluence = 0
+	pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.9), NumberSequenceKeypoint.new(1, 0) })
+	pe.Transparency = NumberSequence.new(0.1, 1)
+	pe.Lifetime = NumberRange.new(0.35, 0.6)
+	pe.Speed = NumberRange.new(6, 12)
+	pe.SpreadAngle = Vector2.new(35, 35)
+	pe.EmissionDirection = Enum.NormalId.Top
+	pe.Acceleration = Vector3.new(0, 10, 0)
+	pe.Rate = own and 90 or 35
+	pe.Parent = att
+	task.delay(duration, function() pe.Enabled = false end)
+	Debris:AddItem(att, duration + 0.7)
+	local spikes = own and 8 or 4
+	for i = 1, spikes do
+		local a = (i / spikes) * math.pi * 2
+		local offset = Vector3.new(math.cos(a), 0, math.sin(a)) * 2.2
+		local base = root.Position + offset - Vector3.new(0, 2, 0)
+		local spike = fxPart({ Size = Vector3.new(0.22, 3, 0.22), Color = i % 2 == 0 and CYAN or GREEN, Transparency = 0.25,
+			CFrame = CFrame.lookAt(base, base + offset * 0.9 + Vector3.new(0, 4, 0)) * CFrame.Angles(math.rad(-90), 0, 0) }, duration + 0.1)
+		TweenService:Create(spike, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = spike.CFrame + Vector3.new(0, 3, 0) + offset * 0.4, Transparency = 1, Size = Vector3.new(0.1, 5.5, 0.1) }):Play()
+	end
+end
+
+-- Anlauf: Animation + gestaffelte Ringe + Aura; volle Effektmenge nur für den eigenen Schützen (FX-Budget)
 function AuroraFX.windup(userId, windup)
 	local char, plr = charOf(userId)
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -1612,6 +1646,7 @@ function AuroraFX.windup(userId, windup)
 	ringBurst(feet, CYAN, 0.08, 18, 0.4)
 	if own then ringBurst(feet, GOLD, 0.16, 22, 0.45) end
 	flash(root, GREEN, own and 5 or 2.5, windup + 0.2)
+	AuroraFX.aura(root, own, windup + 0.35)
 	playKick(char, windup, function(name)
 		local m = AuroraFX.markers[userId]
 		if not m then return end
@@ -1692,8 +1727,53 @@ function AuroraFX.cancel(userId)
 	if char then stopKick(char) end
 end
 
+local TEAM_TINT = {
+	Rot = { band = Color3.fromRGB(200, 30, 45), tint = Color3.fromRGB(255, 215, 215) },
+	Blau = { band = Color3.fromRGB(30, 70, 220), tint = Color3.fromRGB(210, 222, 255) },
+}
+local AURORA_TINT = { band = Color3.fromRGB(10, 150, 110), tint = Color3.fromRGB(200, 255, 230) }
+
 -- GOAL-Cinematic: nur auf das serverbestätigte Tor-Ereignis (GoalSeq), nie bei Fehlschüssen
 function AuroraFX.goal(gui, team, aurora)
+	local look = aurora and AURORA_TINT or TEAM_TINT[team] or TEAM_TINT.Blau
+	-- Querband hinter dem Titel in Teamfarbe (AURORA: Grün), fährt von links ein (bei Reduced Motion ohne Fahrt)
+	local band = Instance.new("Frame")
+	band.Name = "GoalBand"
+	band.AnchorPoint = Vector2.new(0.5, 0.5)
+	band.Size = UDim2.new(1.3, 0, 0, 205) -- umfasst Titel und Untertitel des Banners
+	band.Rotation = -4
+	band.BorderSizePixel = 0
+	band.ZIndex = 0
+	band.BackgroundColor3 = look.band
+	band.BackgroundTransparency = 0.15
+	local fadeEdges = Instance.new("UIGradient")
+	fadeEdges.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.18, 0.1),
+		NumberSequenceKeypoint.new(0.82, 0.1), NumberSequenceKeypoint.new(1, 1) })
+	fadeEdges.Parent = band
+	for _, y in ipairs({ 0, 1 }) do
+		local edge = Instance.new("Frame")
+		edge.AnchorPoint = Vector2.new(0, y)
+		edge.Position = UDim2.fromScale(0, y)
+		edge.Size = UDim2.new(1, 0, 0, 5)
+		edge.BorderSizePixel = 0
+		edge.BackgroundColor3 = GOLD
+		edge.ZIndex = 0
+		edge.Parent = band
+	end
+	band.Position = AuroraFX.reducedMotion and UDim2.fromScale(0.5, 0.55) or UDim2.fromScale(-0.7, 0.55)
+	band.Parent = gui
+	if not AuroraFX.reducedMotion then
+		TweenService:Create(band, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{ Position = UDim2.fromScale(0.5, 0.55) }):Play()
+	end
+	task.delay(1.3, function()
+		TweenService:Create(band, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+		for _, e in ipairs(band:GetChildren()) do
+			if e:IsA("Frame") then TweenService:Create(e, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play() end
+		end
+	end)
+	Debris:AddItem(band, 1.7)
+
 	-- Banner in Bildmitte (Torpause, kein laufendes Spiel): großer goldener Titel + Untertitel
 	local banner = Instance.new("Frame")
 	banner.Name = "GoalBanner"
@@ -1747,8 +1827,10 @@ function AuroraFX.goal(gui, team, aurora)
 	cc.Name = "UP_GoalGrade"
 	cc.Saturation = aurora and -0.75 or -0.4
 	cc.Contrast = 0.15
+	cc.TintColor = look.tint -- Team- bzw. AURORA-Färbung des Bildes
 	cc.Parent = Lighting
-	TweenService:Create(cc, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Saturation = 0, Contrast = 0 }):Play()
+	TweenService:Create(cc, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{ Saturation = 0, Contrast = 0, TintColor = Color3.new(1, 1, 1) }):Play()
 	Debris:AddItem(cc, 1.1)
 	if aurora then
 		local white = Instance.new("Frame")
