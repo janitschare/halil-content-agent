@@ -34,14 +34,26 @@ local function fxPart(props, life)
 	return p
 end
 
--- Posen als Winkel (rad) je Gelenk; Zeit relativ zum Kick-Marker (0 = Ballkontakt)
+-- Posen als Winkel (rad) je Gelenk; Zeit relativ zum Kick-Marker (0 = Ballkontakt).
+-- Schussbein rechts (hip/knee), Standbein links (lhip/lknee), Oberkörper (waist = Drehung, lean = Rücklage), Arme.
+-- Vorzeichen (in Studio gemessen): positiver Hüftwinkel schwingt das Bein nach VORN, negativer nach hinten;
+-- negativer Kniewinkel beugt den Unterschenkel nach hinten. Kontaktpose: Fußmitte ca. 1,5 Studs vor dem
+-- Körper auf Ballhöhe (Ball liegt beim Anlauf 2,6 Studs vor dem Schützen am Boden, Radius 1,1).
 local POSES = {
-	{ t = -0.30, hip = 0, knee = 0, waist = 0, lsh = 0, rsh = 0 },
-	{ t = -0.10, hip = 0.95, knee = -1.25, waist = 0.35, lsh = -0.9, rsh = 0.7 },   -- Ausholen
-	{ t = 0.00, hip = -1.35, knee = -0.15, waist = -0.25, lsh = 0.5, rsh = -0.6 },  -- Kontakt (Marker "Kick")
-	{ t = 0.12, hip = -1.6, knee = 0, waist = -0.35, lsh = 0.7, rsh = -0.8 },       -- Durchschwung
-	{ t = 0.45, hip = 0, knee = 0, waist = 0, lsh = 0, rsh = 0 },                   -- Ausschwingen
+	{ t = -0.30, hip = 0, knee = 0, lhip = 0, lknee = 0, waist = 0, lean = 0, lsh = 0, rsh = 0 },
+	{ t = -0.16, hip = -0.4, knee = -0.6, lhip = 0.15, lknee = -0.3, waist = 0.15, lean = 0, lsh = -0.4, rsh = 0.3 },   -- Anlauf
+	{ t = -0.07, hip = -0.9, knee = -1.4, lhip = 0.25, lknee = -0.45, waist = 0.4, lean = -0.05, lsh = -1.0, rsh = 0.6 }, -- Ausholen
+	{ t = 0.00, hip = 0.7, knee = -0.1, lhip = 0.2, lknee = -0.5, waist = -0.2, lean = 0.1, lsh = 0.4, rsh = -0.5 },     -- Kontakt
+	{ t = 0.10, hip = 1.4, knee = -0.05, lhip = 0.1, lknee = -0.3, waist = -0.35, lean = 0.15, lsh = 0.6, rsh = -0.8 },  -- Durchschwung
+	{ t = 0.45, hip = 0, knee = 0, lhip = 0, lknee = 0, waist = 0, lean = 0, lsh = 0, rsh = 0 },                         -- Ausschwingen
 }
+-- Der Ball ist serverseitig. Beim Client kommt seine Geschwindigkeit sofort an, die sichtbare Position aber mit
+-- Interpolationsverzögerung (gemessen ~0,2 s). Darum hängt der sichtbare Kontakt an der Ballbewegung: Die
+-- Kontaktpose wird gehalten, bis der Ball sich sichtbar vom Fuß löst (höchstens CONTACT_HOLD); löst er sich
+-- früher, springt die Animation in den Kontakt. „Löst sich“ = schnell UND weiter als die Haltedistanz entfernt.
+local CONTACT_HOLD = 0.25
+local BALL_MOVING = 30
+local HOLD_DIST = 3.3 -- Server hält den Ball im Anlauf 2,6 Studs vor dem Schützen
 
 local function sample(t)
 	if t <= POSES[1].t then return POSES[1] end
@@ -85,20 +97,42 @@ AuroraFX.stopKick = stopKick
 
 -- Prozedurale R15-Kickanimation; meldet den Kick-Marker über onMarker. Fehlen die Gelenke (R6/eigenes Rig),
 -- läuft nur der Marker – die Server-Logik hängt ohnehin nicht an der Animation.
-local function playKick(char, windup, onMarker)
+local function playKick(char, windup, onMarker, ball)
 	stopKick(char)
 	local joints = {
 		hip = joint(char, "RightUpperLeg", "RightHip"),
 		knee = joint(char, "RightLowerLeg", "RightKnee"),
+		lhip = joint(char, "LeftUpperLeg", "LeftHip"),
+		lknee = joint(char, "LeftLowerLeg", "LeftKnee"),
 		waist = joint(char, "UpperTorso", "Waist"),
 		lsh = joint(char, "LeftUpperArm", "LeftShoulder"),
 		rsh = joint(char, "RightUpperArm", "RightShoulder"),
 	}
 	local start = os.clock()
+	local contactAt = windup
 	local fired = false
+	local heldSince = nil
+	local rootPart = char:FindFirstChild("HumanoidRootPart")
+	local function ballMoving()
+		if not (ball and ball.Parent and rootPart) then return false end
+		local d = ball.Position - rootPart.Position
+		return ball.AssemblyLinearVelocity.Magnitude > BALL_MOVING and Vector3.new(d.X, 0, d.Z).Magnitude > HOLD_DIST
+	end
 	local function step()
-		local t = os.clock() - start - windup
-		if not fired and t >= 0 then
+		local t = os.clock() - start - contactAt
+		if t < 0 and ballMoving() then
+			-- Ball fliegt schon: sofort in die Kontaktphase
+			start = os.clock() - contactAt
+			t = 0
+		elseif t >= 0 and not fired then
+			-- Kontaktpose halten, bis der Ball sichtbar losfliegt (oder Haltezeit vorbei ist)
+			heldSince = heldSince or os.clock()
+			if not ballMoving() and os.clock() - heldSince < CONTACT_HOLD then
+				start = os.clock() - contactAt
+				t = 0
+			end
+		end
+		if not fired and t >= 0 and (ballMoving() or (heldSince and os.clock() - heldSince >= CONTACT_HOLD)) then
 			fired = true
 			onMarker("Kick")
 		end
@@ -106,7 +140,9 @@ local function playKick(char, windup, onMarker)
 		local pose = sample(t)
 		if joints.hip then joints.hip.Transform = CFrame.Angles(pose.hip, 0, 0) end
 		if joints.knee then joints.knee.Transform = CFrame.Angles(pose.knee, 0, 0) end
-		if joints.waist then joints.waist.Transform = CFrame.Angles(0, pose.waist, 0) end
+		if joints.lhip then joints.lhip.Transform = CFrame.Angles(pose.lhip, 0, 0) end
+		if joints.lknee then joints.lknee.Transform = CFrame.Angles(pose.lknee, 0, 0) end
+		if joints.waist then joints.waist.Transform = CFrame.Angles(pose.lean, pose.waist, 0) end
 		if joints.lsh then joints.lsh.Transform = CFrame.Angles(0, 0, pose.lsh) end
 		if joints.rsh then joints.rsh.Transform = CFrame.Angles(0, 0, pose.rsh) end
 	end
@@ -148,6 +184,23 @@ local function cameraPush(amount)
 		local back = TweenService:Create(cam, TweenInfo.new(0.45, Enum.EasingStyle.Quad), { FieldOfView = base })
 		back.Completed:Connect(function() if my == pushToken then pushBase = nil end end)
 		back:Play()
+	end)
+end
+
+-- Kurzer Kamera-Impuls beim Kontakt (nur Schütze, aus bei Reduced Motion): 0,22 s abklingendes Zittern,
+-- nach der Standard-Kamera angewendet; die Kamera kehrt danach von selbst in ihre Bahn zurück.
+local shakeId = 0
+local function cameraShake(strength, duration)
+	if AuroraFX.reducedMotion then return end
+	shakeId += 1
+	local name = "UP_AuroraShake" .. shakeId
+	local t0 = os.clock()
+	RunService:BindToRenderStep(name, Enum.RenderPriority.Camera.Value + 1, function()
+		local cam = workspace.CurrentCamera
+		local k = 1 - (os.clock() - t0) / duration
+		if k <= 0 or not cam then RunService:UnbindFromRenderStep(name) return end
+		local a = strength * k * k
+		cam.CFrame = cam.CFrame * CFrame.Angles(math.rad(math.sin(os.clock() * 90) * a), math.rad(math.cos(os.clock() * 70) * a), 0)
 	end)
 end
 
@@ -249,7 +302,7 @@ function AuroraFX.windup(userId, windup)
 		m.marker = name
 		-- Messwert für Tests (lokal, nicht repliziert): Abstand Anlaufbeginn -> Kick-Marker
 		if own then Players.LocalPlayer:SetAttribute("AuroraMarkerDelay", m.markerAt - m.windupAt) end
-	end)
+	end, workspace:FindFirstChild("UltimatePitch") and workspace.UltimatePitch:FindFirstChild("Ball"))
 end
 
 -- Server hat am Kick-Marker geschossen: Ball-Kern, Spur, Streifen, Bodenimpuls, Kamera
@@ -312,7 +365,7 @@ function AuroraFX.kick(userId, ball)
 		TweenService:Create(s, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			{ CFrame = CFrame.lookAt(origin + dir * 14, origin + dir * 22), Transparency = 1 }):Play()
 	end
-	if own then cameraPush(14) elseif root and workspace.CurrentCamera
+	if own then cameraPush(14) cameraShake(0.9, 0.22) elseif root and workspace.CurrentCamera
 		and (workspace.CurrentCamera.CFrame.Position - root.Position).Magnitude < 60 then cameraPush(5) end
 end
 

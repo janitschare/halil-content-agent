@@ -361,17 +361,128 @@ local function simpleRig(color)
 	return m
 end
 
+---------------------------------------------------------------- Trikots (eigene Kits, nur Teilefarben + Rückennummer)
+-- Einheitliche Teamkleidung für Bots und Spieler: Trikot mit kurzen Ärmeln (Oberarm in Trikotfarbe),
+-- Hose, Stutzen in Teamfarbe, dunkle Schuhe, Rückennummer und kleines Brustabzeichen als SurfaceGui.
+-- Keine Kleidungs-Assets: eigene Spieler-Kleidung (Shirt/Pants/T-Shirt-Bild) wird im Match entfernt.
+local KIT = {
+	Rot = { shorts = Color3.fromRGB(245, 245, 245), socks = Color3.fromRGB(200, 30, 40), trim = Color3.fromRGB(255, 255, 255) },
+	Blau = { shorts = Color3.fromRGB(20, 28, 60), socks = Color3.fromRGB(40, 90, 230), trim = Color3.fromRGB(255, 220, 90) },
+}
+local NUMBERS = { 1, 4, 5, 10, 9 }
+local SKIN = { Color3.fromRGB(234, 184, 146), Color3.fromRGB(198, 140, 100), Color3.fromRGB(141, 92, 62),
+	Color3.fromRGB(96, 62, 44), Color3.fromRGB(245, 205, 170) }
+local BOOTS = Color3.fromRGB(22, 22, 26)
+
+local function kitLabel(parent, face, text, size, color, name)
+	local old = parent:FindFirstChild(name)
+	if old then old:Destroy() end
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = name
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 50
+	gui.LightInfluence = 1
+	gui.Parent = parent
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.AnchorPoint = Vector2.new(0.5, 0.5)
+	l.Position = UDim2.fromScale(0.5, 0.45)
+	l.Size = UDim2.fromScale(size, size)
+	l.Font = Enum.Font.GothamBlack
+	l.TextScaled = true
+	l.Text = text
+	l.TextColor3 = color
+	l.Parent = gui
+end
+
+local function applyKit(char, td, slot)
+	local kit = KIT[td.name]
+	if not kit then return end
+	local shirt = slot == 1 and td.keeper or td.color
+	for _, d in ipairs(char:GetChildren()) do
+		if d:IsA("Shirt") or d:IsA("Pants") or d:IsA("ShirtGraphic") then d:Destroy() end
+	end
+	local skin = char:GetAttribute("SkinColor")
+	if not skin then
+		local head = char:FindFirstChild("Head")
+		skin = head and head.Color or SKIN[1]
+	end
+	local paint = {
+		UpperTorso = shirt, LowerTorso = shirt, LeftUpperArm = shirt, RightUpperArm = shirt,
+		LeftLowerArm = skin, RightLowerArm = skin, LeftHand = slot == 1 and BOOTS or skin, RightHand = slot == 1 and BOOTS or skin,
+		LeftUpperLeg = kit.shorts, RightUpperLeg = kit.shorts, LeftLowerLeg = kit.socks, RightLowerLeg = kit.socks,
+		LeftFoot = BOOTS, RightFoot = BOOTS,
+	}
+	for partName, color in pairs(paint) do
+		local p = char:FindFirstChild(partName)
+		if p and p:IsA("BasePart") then
+			p.Color = color
+			for _, s in ipairs(p:GetChildren()) do
+				if s:IsA("SurfaceAppearance") then s:Destroy() end
+			end
+			if p:IsA("MeshPart") then pcall(function() p.TextureID = "" end) end
+		end
+	end
+	local torso = char:FindFirstChild("UpperTorso")
+	if torso then
+		kitLabel(torso, Enum.NormalId.Back, tostring(NUMBERS[slot] or slot), 0.8, kit.trim, "KitNumber")
+		kitLabel(torso, Enum.NormalId.Front, "UP", 0.32, kit.trim, "KitBadge")
+	end
+	char:SetAttribute("KitTeam", td.name)
+end
+
+-- Laufanimationen für Bots: Roblox-Standardanimationen (R15 Idle/Lauf aus dem Standard-Animate-Skript),
+-- kein eigener Upload. Wechsel über Humanoid.Running.
+local BOT_ANIMS = { idle = "rbxassetid://507766388", run = "rbxassetid://913376220" }
+local function animateBot(model, hum)
+	local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+	local tracks = {}
+	for key, id in pairs(BOT_ANIMS) do
+		local a = Instance.new("Animation")
+		a.AnimationId = id
+		local ok, track = pcall(function() return animator:LoadAnimation(a) end)
+		if ok and track then
+			track.Looped = true
+			track.Priority = Enum.AnimationPriority.Core
+			tracks[key] = track
+		end
+	end
+	if not tracks.idle and not tracks.run then return end
+	local current
+	local function play(key, speed)
+		local t = tracks[key]
+		if not t then return end
+		if current ~= t then
+			if current then current:Stop(0.15) end
+			t:Play(0.15)
+			current = t
+		end
+		if key == "run" then t:AdjustSpeed(math.clamp(speed / 16, 0.6, 1.5)) end
+	end
+	play("idle", 0)
+	hum.Running:Connect(function(speed)
+		if not model.Parent then return end
+		if speed > 1 then play("run", speed) else play("idle", 0) end
+	end)
+end
+
 local function makeBot(td, slot)
 	local shirt = slot == 1 and td.keeper or td.color
 	local model
+	local skin = SKIN[math.random(1, #SKIN)]
 	local ok = pcall(function()
 		local d = Instance.new("HumanoidDescription")
-		d.HeadColor = Color3.fromRGB(234, 184, 146)
+		d.HeadColor = skin
 		d.TorsoColor, d.LeftArmColor, d.RightArmColor = shirt, shirt, shirt
 		d.LeftLegColor, d.RightLegColor = Color3.fromRGB(30, 30, 30), Color3.fromRGB(30, 30, 30)
+		-- athletischere Proportionen: etwas größer, schmaler, schlanker Kopf
+		d.HeightScale, d.WidthScale, d.DepthScale, d.HeadScale = 1.05, 0.9, 0.92, 0.95
 		model = Players:CreateHumanoidModelFromDescription(d, Enum.HumanoidRigType.R15)
 	end)
 	if not ok or not model then model = simpleRig(shirt) end
+	model:SetAttribute("SkinColor", skin)
+	applyKit(model, td, slot)
 	local name = (slot == 1 and "TW " or "Bot ") .. td.name .. " " .. slot
 	model.Name = name
 	local hum = model:FindFirstChildOfClass("Humanoid")
@@ -384,6 +495,7 @@ local function makeBot(td, slot)
 	model.Parent = BotsFolder
 	local hrp = model:FindFirstChild("HumanoidRootPart")
 	if hrp then pcall(function() hrp:SetNetworkOwner(nil) end) end
+	animateBot(model, hum)
 	return model
 end
 
@@ -417,6 +529,17 @@ local function placePlayer(plr, teamName, slot)
 	if hum then hum.WalkSpeed = CFG.PlayerSpeed end
 	char:SetAttribute("BaseSpeed", CFG.PlayerSpeed)
 	highlight(char, TEAM[teamName])
+	-- Teamtrikot erst nach geladenem Avatar anziehen (sonst lädt die eigene Kleidung danach nach)
+	task.spawn(function()
+		if not plr:HasAppearanceLoaded() then
+			local done = false
+			local conn = plr.CharacterAppearanceLoaded:Connect(function() done = true end)
+			local t0 = os.clock()
+			while not done and os.clock() - t0 < 6 do task.wait(0.2) end
+			conn:Disconnect()
+		end
+		if plr.Character == char and char.Parent then applyKit(char, TEAM[teamName], slot) end
+	end)
 end
 
 local function members(teamName)
