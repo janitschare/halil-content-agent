@@ -58,40 +58,62 @@ local function sample(t)
 	return POSES[#POSES]
 end
 
-local function motor(char, partName, motorName)
+-- R15-Gelenk finden: klassisch Motor6D, mit AvatarJointUpgrade AnimationConstraint (gleicher Name, beide haben .Transform)
+local function joint(char, partName, jointName)
 	local p = char:FindFirstChild(partName)
-	return p and p:FindFirstChild(motorName)
+	local j = p and p:FindFirstChild(jointName)
+	if not j then j = char:FindFirstChild(jointName, true) end
+	if j and (j:IsA("Motor6D") or j:IsA("AnimationConstraint")) then return j end
+	return nil
 end
+AuroraFX.joint = joint
 
--- Prozedurale R15-Kickanimation; meldet den Kick-Marker über onMarker
+-- Overlay nach dem Animator: PreSimulation (Nachfolger von Stepped), Stepped nur als Rückfall
+local preSim = RunService.PreSimulation or RunService.Stepped
+
+local active = {} -- laufende Kickanimation je Figur: { conn, joints }
+local function stopKick(char)
+	local a = active[char]
+	if not a then return end
+	active[char] = nil
+	if a.conn.Connected then a.conn:Disconnect() end
+	for _, j in pairs(a.joints) do
+		if j.Parent then j.Transform = CFrame.identity end
+	end
+end
+AuroraFX.stopKick = stopKick
+
+-- Prozedurale R15-Kickanimation; meldet den Kick-Marker über onMarker. Fehlen die Gelenke (R6/eigenes Rig),
+-- läuft nur der Marker – die Server-Logik hängt ohnehin nicht an der Animation.
 local function playKick(char, windup, onMarker)
+	stopKick(char)
 	local joints = {
-		hip = motor(char, "RightUpperLeg", "RightHip"),
-		knee = motor(char, "RightLowerLeg", "RightKnee"),
-		waist = motor(char, "UpperTorso", "Waist"),
-		lsh = motor(char, "LeftUpperArm", "LeftShoulder"),
-		rsh = motor(char, "RightUpperArm", "RightShoulder"),
+		hip = joint(char, "RightUpperLeg", "RightHip"),
+		knee = joint(char, "RightLowerLeg", "RightKnee"),
+		waist = joint(char, "UpperTorso", "Waist"),
+		lsh = joint(char, "LeftUpperArm", "LeftShoulder"),
+		rsh = joint(char, "RightUpperArm", "RightShoulder"),
 	}
-	if not joints.hip then return end
 	local start = os.clock()
 	local fired = false
-	local conn
-	conn = RunService.Stepped:Connect(function()
+	local function step()
 		local t = os.clock() - start - windup
-		if not char.Parent then conn:Disconnect() return end
+		if not fired and t >= 0 then
+			fired = true
+			onMarker("Kick")
+		end
+		if not char.Parent or t > POSES[#POSES].t then stopKick(char) return end
 		local pose = sample(t)
 		if joints.hip then joints.hip.Transform = CFrame.Angles(pose.hip, 0, 0) end
 		if joints.knee then joints.knee.Transform = CFrame.Angles(pose.knee, 0, 0) end
 		if joints.waist then joints.waist.Transform = CFrame.Angles(0, pose.waist, 0) end
 		if joints.lsh then joints.lsh.Transform = CFrame.Angles(0, 0, pose.lsh) end
 		if joints.rsh then joints.rsh.Transform = CFrame.Angles(0, 0, pose.rsh) end
-		if not fired and t >= 0 then
-			fired = true
-			onMarker("Kick")
-		end
-		if t > POSES[#POSES].t then conn:Disconnect() end
-	end)
+	end
+	active[char] = { conn = preSim:Connect(step), joints = joints }
+	return joints.hip ~= nil
 end
+AuroraFX.playKick = playKick
 
 local function ringBurst(pos, color, delay, size, life)
 	task.delay(delay, function()
@@ -112,13 +134,20 @@ local function flash(root, color, brightness, life)
 	Debris:AddItem(light, life + 0.05)
 end
 
+-- FOV-Push: Ausgangs-FOV merken (nicht fest 70), überlappende Pushes kehren zum ursprünglichen Wert zurück
+local pushBase, pushToken = nil, 0
 local function cameraPush(amount)
 	local cam = workspace.CurrentCamera
 	if AuroraFX.reducedMotion or not cam then return end
-	local base = 70
+	pushBase = pushBase or cam.FieldOfView
+	pushToken += 1
+	local my, base = pushToken, pushBase
 	TweenService:Create(cam, TweenInfo.new(0.1, Enum.EasingStyle.Quad), { FieldOfView = base + amount }):Play()
 	task.delay(0.16, function()
-		TweenService:Create(cam, TweenInfo.new(0.45, Enum.EasingStyle.Quad), { FieldOfView = base }):Play()
+		if my ~= pushToken then return end
+		local back = TweenService:Create(cam, TweenInfo.new(0.45, Enum.EasingStyle.Quad), { FieldOfView = base })
+		back.Completed:Connect(function() if my == pushToken then pushBase = nil end end)
+		back:Play()
 	end)
 end
 
@@ -200,6 +229,8 @@ end
 
 function AuroraFX.cancel(userId)
 	AuroraFX.markers[userId] = nil
+	local char = charOf(userId)
+	if char then stopKick(char) end
 end
 
 -- GOAL-Cinematic: nur auf das serverbestätigte Tor-Ereignis (GoalSeq), nie bei Fehlschüssen
@@ -209,8 +240,11 @@ function AuroraFX.goal(gui, team, aurora)
 	banner.Name = "GoalBanner"
 	banner.AnchorPoint = Vector2.new(0.5, 0.5)
 	banner.Position = UDim2.fromScale(0.5, 0.55)
-	banner.Size = UDim2.fromOffset(640, 190)
+	banner.Size = UDim2.new(0.92, 0, 0, 190) -- schmale Bildschirme: 92 % Breite, höchstens 640 px
 	banner.BackgroundTransparency = 1
+	local limit = Instance.new("UISizeConstraint")
+	limit.MaxSize = Vector2.new(640, 190)
+	limit.Parent = banner
 	banner.Rotation = -4
 	local title = Instance.new("TextLabel")
 	title.Size = UDim2.new(1, 0, 0, 140)

@@ -284,7 +284,11 @@ local botCd, lastKick = {}, {}
 -- Serverseitiger Spielerzustand: Schussladung, Sprint-Wunsch, Ausdauer, Bewegungs-Stichprobe, Skill-Cooldown
 local chargeStart, sprintWanted, stamina, motion, auroraReady = {}, {}, {}, {}, {}
 local auroraHold = nil      -- { player, releaseAt } während des Anlaufs: Ball wird vor dem Spieler gehalten
-local auroraFlightUntil = 0 -- Tore bis zu diesem Zeitpunkt zählen als AURORA-BREAK-Tor (nur Darstellung)
+-- Schuss-Token des letzten AURORA-Kicks: { id, player, team, expires }. Jede andere Ballaktion
+-- (Pass, Schuss, Bot-Kick, Parade, Ball-Reset, Berührung durch eine andere Figur) löscht es.
+-- Ein Tor zählt nur als AURORA-Tor, wenn das Token noch gilt und das Tor für das Team des Schützen fällt.
+local auroraShot = nil
+local auroraShotSeq = 0
 local EffectEvent = SHARED:WaitForChild("Effect")
 
 -- Gewollter Server-Teleport: Bezugspunkt der Bewegungsprüfung mitziehen, sonst würde sie zurücksetzen
@@ -318,17 +322,28 @@ end
 
 ---------------------------------------------------------------- Ball
 local function resetBall()
+	auroraShot = nil
 	Ball.AssemblyLinearVelocity = Vector3.zero
 	Ball.AssemblyAngularVelocity = Vector3.zero
 	Ball.CFrame = CFrame.new(0, CFG.GroundY + 3, 0)
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 end
 local function kickBall(vel)
+	auroraShot = nil -- jede neue Ballaktion beendet die Zuordnung zum letzten AURORA-Schuss
 	local k = Ball:FindFirstChild("Kick")
 	if k then k:Play() end
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 	Ball.AssemblyLinearVelocity = vel
 end
+-- Berührt eine andere Figur (Spieler oder Bot) den Ball, gehört ein späteres Tor nicht mehr zum AURORA-Schuss
+Ball.Touched:Connect(function(part)
+	local shot = auroraShot
+	if not shot then return end
+	local model = part:FindFirstAncestorOfClass("Model")
+	if model and model:FindFirstChildOfClass("Humanoid") and model ~= shot.player.Character then
+		auroraShot = nil
+	end
+end)
 
 ---------------------------------------------------------------- Bots
 local function simpleRig(color)
@@ -732,7 +747,10 @@ local function releaseAurora()
 	local td = TEAM[plr.Team and plr.Team.Name]
 	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td and td.sign or 1, 0, 0))
 	kickBall(look * CFG.AuroraSpeed + Vector3.new(0, CFG.AuroraLift, 0))
-	auroraFlightUntil = os.clock() + CFG.AuroraGoalWindow
+	auroraShotSeq += 1
+	auroraShot = { id = auroraShotSeq, player = plr, team = plr.Team and plr.Team.Name,
+		expires = os.clock() + CFG.AuroraGoalWindow }
+	State:SetAttribute("AuroraShotId", auroraShotSeq)
 	EffectEvent:FireAllClients("AuroraKick", plr.UserId)
 end
 
@@ -814,7 +832,11 @@ RunService.Heartbeat:Connect(function(dt)
 	if not pendingGoal and math.abs(p.Z) < CFG.GoalHalfWidth and p.Y < CFG.GroundY + CFG.GoalHeight then
 		if p.X > CFG.HalfLength + 1.2 then pendingGoal = "Rot"
 		elseif p.X < -CFG.HalfLength - 1.2 then pendingGoal = "Blau" end
-		if pendingGoal then pendingGoalAurora = os.clock() < auroraFlightUntil end
+		if pendingGoal then
+			local shot = auroraShot
+			pendingGoalAurora = shot ~= nil and os.clock() < shot.expires and shot.team == pendingGoal
+			auroraShot = nil
+		end
 	end
 	-- Ball verloren?
 	if p.Y < -20 or math.abs(p.X) > 100 or math.abs(p.Z) > 70 then resetBall() end
