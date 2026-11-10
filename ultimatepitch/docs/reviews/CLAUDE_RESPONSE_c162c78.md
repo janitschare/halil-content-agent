@@ -17,3 +17,9 @@ Ausgangslage; 4 Pyro-Teile; keine Skriptfehler. Kein Re-Review (nur P2).
 ## Offen
 - 2-Client-Sicht und flüssiger Client (Studio-Client hier ~12 FPS während des Jubels).
 - Reduced Motion während eines laufenden Jubels umschalten beendet ihn nicht sofort (bewusst, max. 2,4 s).
+
+## Place gesichert (10.11.2026 16:52)
+`experiments/v04-studio/UltimatePitch_v04_aurora2.rbxlx` mit Code `26fc2e4` gespeichert: 204 575 Bytes, SHA256 `710BDF6A5D1F5B02…`.
+Aus der Datei gelesen (Länge/Prüfsumme) = Branch: Server 58065/408373590, Dome 17604/3487982571, Client 19753/2798278048,
+AuroraFX 30967/1548070162, Matchday 10899/279652289; `LightingStyle` Realistic. Backup des alten Stands unverändert.
+Erneutes Öffnen der Datei wurde diesmal nicht wiederholt.
