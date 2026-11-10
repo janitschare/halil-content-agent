@@ -1067,6 +1067,27 @@ local function setupTeams()
 			end
 		end
 	end
+	-- Nachbesetzen: makeBot kann warten (Avatar laden). Meldet sich in dieser Zeit ein bereits eingeteilter Spieler
+	-- ab oder verlässt er das Spiel, bliebe sein Platz leer – solche Lücken vor dem Anpfiff mit Bots füllen.
+	local again = true
+	while again do
+		again = false
+		for teamName, td in pairs(TEAM) do
+			for slot = 1, #SLOTS do
+				local e = roster[teamName][slot]
+				if not e or (e.kind == "player" and not e.player.Parent) then
+					roster[teamName][slot] = nil
+					local bot = makeBot(td, slot)
+					if roster[teamName][slot] then
+						bot:Destroy() -- inzwischen anderweitig besetzt
+					else
+						roster[teamName][slot] = { kind = "bot", model = bot }
+					end
+					again = true
+				end
+			end
+		end
+	end
 end
 
 local function cleanup()
