@@ -2848,7 +2848,7 @@ local Matchday = {}
 local TEAM_COLOR = { Rot = Color3.fromRGB(230, 40, 55), Blau = Color3.fromRGB(40, 100, 255) }
 local AURORA_COLOR = Color3.fromRGB(70, 255, 150)
 local HALF_LENGTH = 80
-local INTRO_TIME = 3.2
+local INTRO_TIME = 3 -- Sekunden; läuft im Countdown der Vorbereitung (TimeLeft 3 → Anpfiff)
 local CELEBRATE_TIME = 2.4
 
 local opts = { reducedMotion = function() return false end, fxScale = function() return 1 end, profile = function() return "Hoch" end }
@@ -2922,12 +2922,25 @@ local function titleCard(gui)
 	Debris:AddItem(card, INTRO_TIME + 0.2)
 end
 
--- Kameraflug: von hoch über der Ecke in einem Bogen zur Spielfeldmitte; danach immer zurück zur Standardkamera
+-- Kameraflug: von hoch über der Ecke in einem Bogen zur Spielfeldmitte; danach immer zurück zur Standardkamera.
+-- Gemeinsamer Abbruch für reguläres Ende und Respawn: laufende Tweens stoppen, dann Kamera freigeben.
 local introToken = 0
+local introTweens = {}
+local function abortFlight()
+	introToken += 1
+	for _, tw in ipairs(introTweens) do tw:Cancel() end
+	table.clear(introTweens)
+	local c = workspace.CurrentCamera
+	if c and c.CameraType == Enum.CameraType.Scriptable then
+		c.CameraType = Enum.CameraType.Custom
+		local hum = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then c.CameraSubject = hum end
+	end
+end
 local function cameraFlight()
 	local cam = workspace.CurrentCamera
 	if not cam or opts.reducedMotion() then return end
-	introToken += 1
+	abortFlight() -- evtl. noch laufenden Flug sauber beenden
 	local my = introToken
 	local center = Vector3.new(0, 4, 0)
 	-- Flugbahn innerhalb des Kessels (Innenkante x ±118 / z ±74, Dach 50): von der Ecke über die Längsseite
@@ -2936,26 +2949,20 @@ local function cameraFlight()
 		CFrame.lookAt(Vector3.new(-25, 34, -62), center),
 		CFrame.lookAt(Vector3.new(70, 24, -46), center),
 	}
-	local function restore()
-		if my ~= introToken then return end
-		local c = workspace.CurrentCamera
-		if c then
-			c.CameraType = Enum.CameraType.Custom
-			local hum = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-			if hum then c.CameraSubject = hum end
-		end
-	end
 	local ok = pcall(function()
 		cam.CameraType = Enum.CameraType.Scriptable
 		cam.CFrame = keys[1]
 		local seg = (INTRO_TIME - 0.4) / (#keys - 1)
 		for i = 2, #keys do
 			local tw = TweenService:Create(cam, TweenInfo.new(seg, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { CFrame = keys[i] })
+			table.insert(introTweens, tw)
 			task.delay(seg * (i - 2), function() if my == introToken then tw:Play() end end)
 		end
 	end)
-	-- Rückgabe der Kamera ist garantiert (auch bei Fehler oder Abbruch)
-	task.delay(ok and INTRO_TIME or 0, restore)
+	-- Rückgabe der Kamera ist garantiert (auch bei Fehler); ein späterer Flug/Respawn hat den Token bereits erhöht
+	task.delay(ok and INTRO_TIME or 0, function()
+		if my == introToken then abortFlight() end
+	end)
 end
 
 ---------------------------------------------------------------- Torjubel im Stadion
@@ -3068,15 +3075,23 @@ end
 ---------------------------------------------------------------- Start
 function Matchday.start(State, gui, options)
 	for k, v in pairs(options or {}) do opts[k] = v end
-	local lastPhase = State:GetAttribute("Phase")
-	State:GetAttributeChangedSignal("Phase"):Connect(function()
-		local ph = State:GetAttribute("Phase")
-		-- Matchbeginn = Wechsel aus der Vorbereitungsphase ins laufende Spiel (nicht nach jedem Tor)
-		if lastPhase == "Intermission" and ph == "Playing" then
+	-- Intro in den letzten INTRO_TIME Sekunden der Vorbereitung (Countdown TimeLeft), damit es genau mit dem
+	-- Anpfiff endet und niemand während des Kameraflugs schon spielen muss
+	local introDone = false
+	State:GetAttributeChangedSignal("TimeLeft"):Connect(function()
+		if State:GetAttribute("Phase") ~= "Intermission" then return end
+		local t = State:GetAttribute("TimeLeft") or 0
+		if t == math.ceil(INTRO_TIME) and not introDone then
+			introDone = true
 			titleCard(gui)
 			cameraFlight()
 		end
-		lastPhase = ph
+	end)
+	State:GetAttributeChangedSignal("Phase"):Connect(function()
+		local ph = State:GetAttribute("Phase")
+		if ph == "Intermission" then introDone = false end
+		-- Anpfiff: falls der Flug noch läuft (Zeitversatz), spätestens jetzt beenden
+		if ph == "Playing" then task.delay(0.3, function() if introTweens[1] then abortFlight() end end) end
 	end)
 	local lastSeq = State:GetAttribute("GoalSeq") or 0
 	State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
@@ -3093,12 +3108,8 @@ function Matchday.start(State, gui, options)
 		end
 		lastSeq = seq
 	end)
-	-- Respawn während des Intros: Kamera sofort freigeben
-	Players.LocalPlayer.CharacterAdded:Connect(function()
-		introToken += 1
-		local c = workspace.CurrentCamera
-		if c then c.CameraType = Enum.CameraType.Custom end
-	end)
+	-- Respawn während des Intros: Tweens stoppen und Kamera sofort freigeben
+	Players.LocalPlayer.CharacterAdded:Connect(abortFlight)
 end
 
 return Matchday
