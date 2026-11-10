@@ -45,13 +45,28 @@ local function sourceState(id)
 	return folder and folder:FindFirstChild("State")
 end
 local viewConns = {}
+local bindGen = 0
 local function bindArena(id)
+	bindGen += 1
+	local myGen = bindGen
 	for _, c in ipairs(viewConns) do c:Disconnect() end
 	table.clear(viewConns)
-	local src = type(id) == "string" and id ~= "" and sourceState(id) or nil
+	local wanted = type(id) == "string" and id ~= ""
+	local src = wanted and sourceState(id) or nil
 	if not src then
 		for k, v in pairs(VIEW_DEFAULTS) do State:SetAttribute(k, v) end
 		carrierView.Value = nil
+		if wanted then
+			-- Zustand der Arena ist noch nicht repliziert (Reihenfolge nicht garantiert): nachträglich binden,
+			-- sofern inzwischen kein anderer Wechsel/Verlassen stattgefunden hat (Generation)
+			task.spawn(function()
+				local t0 = os.clock()
+				while myGen == bindGen and os.clock() - t0 < 30 do
+					task.wait(0.25)
+					if myGen == bindGen and sourceState(id) then bindArena(id) return end
+				end
+			end)
+		end
 		return
 	end
 	local srcGoal, srcMsg = src:GetAttribute("GoalSeq") or 0, src:GetAttribute("MessageId") or 0

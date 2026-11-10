@@ -1602,15 +1602,23 @@ createArena({ id = "StreetCourt", origin = LAYOUT.court.origin, halfLength = LAY
 	exitCFrame = CFrame.lookAt(Vector3.new(78, 5, -222), Vector3.new(86, 5, -235)) })
 local city = require(script:WaitForChild("City")).build(workspace:WaitForChild("UltimatePitch"), LAYOUT)
 
--- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Die Berührung
--- wertet der Server aus; der Client kann sich nicht selbst anmelden.
+-- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Berührungen
+-- clientbesessener Figuren meldet der Client selbst; der Server prüft deshalb zusätzlich die tatsächliche
+-- Position der Figur (HumanoidRootPart über der Pad-Fläche, kleine Toleranz), bevor er anmeldet.
 local padTouch = {}
+local function standsOnPad(char, pad)
+	local root = char:FindFirstChild("HumanoidRootPart")
+	if not root then return false end
+	local rel = pad.CFrame:PointToObjectSpace(root.Position)
+	return math.abs(rel.X) <= pad.Size.X / 2 + 2 and math.abs(rel.Z) <= pad.Size.Z / 2 + 2 and rel.Y > -1 and rel.Y < 7
+end
 for arenaId, pad in pairs(city.pads) do
 	pad.Touched:Connect(function(hit)
 		local char = hit.Parent
 		local plr = char and PlayersService:GetPlayerFromCharacter(char)
 		local hum = plr and char:FindFirstChildOfClass("Humanoid")
-		if not hum or hum.Health <= 0 then return end
+		if not hum or hum.Health <= 0 or plr.Character ~= char then return end
+		if not standsOnPad(char, pad) then return end
 		local now = os.clock()
 		if (padTouch[plr] or 0) + 1.5 > now then return end
 		padTouch[plr] = now
