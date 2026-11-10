@@ -9,7 +9,8 @@
         "$path": "src/Server.server.lua",
         "Dome": { "$path": "src/Dome.lua" },
         "City": { "$path": "src/City.lua" },
-        "Career": { "$path": "src/Career.lua" }
+        "Career": { "$path": "src/Career.lua" },
+        "CareerStore": { "$path": "src/CareerStore.lua" }
       }
     },
     "StarterPlayer": {

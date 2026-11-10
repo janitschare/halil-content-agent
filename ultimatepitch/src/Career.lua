@@ -3,10 +3,19 @@
 -- Player-Attribute (nur lesend für Clients) und leaderstats. Clients senden über RemoteEvent "Career" lediglich
 -- Absichten (Scout-Angebot annehmen, Artikel kaufen/anlegen); jede Absicht wird auf Stufe, Preis, Guthaben,
 -- Besitz und Nähe zum NPC/Laden geprüft und gedrosselt.
--- SPEICHERSTAND: bewusst noch nicht dauerhaft (kein DataStore, Freigabe ausstehend). Fortschritt gilt pro Sitzung.
+-- SPEICHERSTAND (freigegeben 10.11.2026): dauerhaft per DataStore "UP_Career_v1" über CareerStore (UpdateAsync mit
+-- Sitzungssperre). Laden beim Betreten, Autosave alle 60 s bei Änderungen, letzter Stand beim Verlassen und beim
+-- Herunterfahren. In einer nicht veröffentlichten Place (Studio, PlaceId 0) gibt es keinen DataStore: Fortschritt gilt
+-- dann nur für die Sitzung ("off"). Studio-Testmodus: Workspace-Attribut UP_CareerMemoryStore = true vor dem Start
+-- nutzt eine Speicher-Attrappe und legt ServerStorage.UP_CareerTest (BindableFunction) für Prüfungen an.
 -- Keine Robux, keine Zufallspakete: Coins gibt es nur fürs Spielen.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
+local ServerStorage = game:GetService("ServerStorage")
+local CareerStore = require(script.Parent:WaitForChild("CareerStore"))
 
 local Career = {}
 
@@ -31,9 +40,20 @@ end
 local INTERACT_RANGE = 14 -- Studs zwischen Spieler und Scout bzw. Ladentheke
 local REQUEST_GAP = 0.3   -- Sekunden zwischen zwei Anfragen eines Spielers
 
-local data = {}       -- [Player] = { coins, stage, owned = {id=true}, equipped = {slot=id}, matches, goals }
+local AUTOSAVE = 60       -- Sekunden zwischen zwei Autosave-Durchläufen (nur geänderte Spielstände)
+
+-- [Player] = { coins, stage, owned = {id=true}, equipped = {slot=id}, matches, goals,
+--              save = "loading"|"ok"|"off"|"error"|"lost", dirty, saving, left, final }
+local data = {}
 local lastRequest = {}
 local remote, scoutRoot, shopRoot
+local persist          -- CareerStore-Objekt oder nil (kein Speichern möglich)
+local memoryStore      -- nur im Studio-Testmodus
+local pending = 0      -- laufende Lade-/Abschlussvorgänge (BindToClose wartet darauf)
+
+local function fresh()
+	return { coins = 0, stage = 1, owned = {}, equipped = {}, matches = 0, goals = 0, save = persist and "loading" or "off" }
+end
 
 local function list(t)
 	local out = {}
@@ -44,9 +64,12 @@ local function list(t)
 	return table.concat(out, ",")
 end
 
-local function sync(plr)
+-- Werte an Attribute/leaderstats spiegeln; jede Änderung markiert den Stand fürs nächste Speichern
+local function sync(plr, clean)
 	local d = data[plr]
 	if not d then return end
+	if not clean then d.dirty = true end
+	plr:SetAttribute("CareerSave", d.save)
 	plr:SetAttribute("PitchCoins", d.coins)
 	plr:SetAttribute("CareerStage", STAGES[d.stage])
 	plr:SetAttribute("CareerStageIndex", d.stage)
@@ -215,6 +238,11 @@ local function onRequest(plr, kind, arg)
 	local now = os.clock()
 	if (lastRequest[plr] or 0) + REQUEST_GAP > now then return end
 	lastRequest[plr] = now
+	if d.save == "loading" or d.left then
+		-- erst nach dem Laden handeln, sonst würde der geladene Stand Käufe dieser Sekunden überschreiben
+		toast(plr, "Dein Spielstand wird noch geladen …")
+		return
+	end
 	if kind == "AcceptScout" then
 		if d.stage ~= 2 or not near(plr, scoutRoot) then return end
 		d.stage = 3
@@ -241,8 +269,126 @@ local function onRequest(plr, kind, arg)
 	end
 end
 
+---------------------------------------------------------------- Speicherstand
+local SAVE_MSG = {
+	error = "Dein Spielstand konnte gerade nicht geladen werden. Fortschritt dieser Sitzung wird nicht gespeichert – bitte später neu beitreten.",
+	lost = "Dein Spielstand wird inzwischen von einem anderen Server geführt. Fortschritt hier wird nicht mehr gespeichert.",
+}
+
+local function setSave(plr, d, state)
+	d.save = state
+	if plr.Parent then plr:SetAttribute("CareerSave", state) end
+	if SAVE_MSG[state] then toast(plr, SAVE_MSG[state]) end
+end
+
+-- Laden beim Betreten. Was in den Sekunden davor verdient wurde (Matchende), wird zum geladenen Stand addiert.
+local function loadPlayer(plr, d)
+	pending += 1
+	local status, loaded = persist.load(plr.UserId)
+	if status ~= "ok" then
+		warn("[Career] Laden fehlgeschlagen für " .. plr.UserId .. ": " .. tostring(loaded))
+		setSave(plr, d, "error")
+		pending -= 1
+		return
+	end
+	loaded.coins = math.min(loaded.coins + d.coins, CareerStore.MAX_COINS)
+	loaded.matches += d.matches
+	loaded.goals += d.goals
+	loaded.stage = math.max(loaded.stage, d.stage)
+	local earned = d.coins > 0 or d.matches > 0 or d.stage > 1
+	d.coins, d.stage, d.owned, d.equipped = loaded.coins, loaded.stage, loaded.owned, loaded.equipped
+	d.matches, d.goals = loaded.matches, loaded.goals
+	d.save = "ok"
+	if d.left then
+		-- während des Ladens gegangen: Stand sofort zurückschreiben und Sperre freigeben
+		persist.save(plr.UserId, d, true)
+	else
+		sync(plr, true)
+		d.dirty = earned
+	end
+	pending -= 1
+end
+
+-- Ein Speicherdurchlauf für einen Spieler (nicht während eines anderen Speichervorgangs desselben Spielers)
+local function saveNow(plr, d, release)
+	while d.saving do task.wait(0.1) end
+	-- nach dem letzten Speichern (Sperre freigegeben) darf kein Zwischenstand die Sperre neu setzen
+	if d.save ~= "ok" or (d.final and not release) then return end
+	d.saving = true
+	d.dirty = false
+	local status, err = persist.save(plr.UserId, d, release)
+	d.saving = false
+	if status == "lost" then
+		setSave(plr, d, "lost")
+	elseif status ~= "ok" then
+		d.dirty = true
+		warn("[Career] Speichern fehlgeschlagen für " .. plr.UserId .. ": " .. tostring(err))
+	end
+	return status
+end
+
+-- Letztes Speichern beim Verlassen oder Herunterfahren (genau einmal je Spieler, gibt die Sperre frei)
+local function finalSave(plr, d)
+	if d.final then return end
+	d.final, d.left = true, true
+	pending += 1
+	if persist and d.save == "ok" then saveNow(plr, d, true) end
+	if data[plr] == d then data[plr] = nil end
+	lastRequest[plr] = nil
+	pending -= 1
+end
+
+local function autosaveLoop()
+	while true do
+		task.wait(AUTOSAVE)
+		for plr, d in pairs(data) do
+			if d.save == "ok" and d.dirty and not d.left and not d.saving then
+				task.spawn(saveNow, plr, d, false)
+				task.wait(0.5) -- Anfragen verteilen
+			end
+		end
+	end
+end
+
+-- Studio-Testmodus: Prüfschnittstelle auf die Speicher-Attrappe (nur Server, nur mit UP_CareerMemoryStore)
+local function testHook()
+	local fn = Instance.new("BindableFunction")
+	fn.Name = "UP_CareerTest"
+	fn.OnInvoke = function(cmd, userId, arg)
+		local plr = userId and Players:GetPlayerByUserId(userId)
+		if cmd == "read" then
+			return HttpService:JSONEncode(memoryStore:read(CareerStore.key(userId)) or {})
+		elseif cmd == "write" then
+			memoryStore:write(CareerStore.key(userId), HttpService:JSONDecode(arg))
+			return true
+		elseif cmd == "fail" then
+			memoryStore.failNext = arg
+			return true
+		elseif cmd == "flush" then
+			local n = 0
+			for p, d in pairs(data) do
+				if d.save == "ok" and d.dirty then saveNow(p, d, false) n += 1 end
+			end
+			return n
+		elseif cmd == "rejoin" and plr and data[plr] then
+			-- Verlassen und erneutes Betreten desselben Spielers nachstellen (gleiche Funktionen wie im Spiel);
+			-- arg (JSON) ersetzt dazwischen den gespeicherten Stand, z. B. einen älteren oder beschädigten Datensatz
+			finalSave(plr, data[plr])
+			if arg then memoryStore:write(CareerStore.key(userId), HttpService:JSONDecode(arg)) end
+			local d = fresh()
+			data[plr] = d
+			sync(plr, true)
+			loadPlayer(plr, d)
+			return d.save .. " coins=" .. d.coins .. " stage=" .. d.stage
+		end
+		return nil
+	end
+	fn.Parent = ServerStorage
+end
+
 local function onPlayer(plr)
-	data[plr] = { coins = 0, stage = 1, owned = {}, equipped = {}, matches = 0, goals = 0 }
+	local d = fresh()
+	data[plr] = d
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
 	local coins = Instance.new("IntValue")
@@ -252,7 +398,8 @@ local function onPlayer(plr)
 	stage.Name = "Stufe"
 	stage.Parent = ls
 	ls.Parent = plr
-	sync(plr)
+	sync(plr, true)
+	if persist then task.spawn(loadPlayer, plr, d) end
 end
 
 -- L = LAYOUT aus dem Server-Skript (Plaza, Court), cityFolder = workspace.UltimatePitch.City
@@ -268,12 +415,35 @@ function Career.init(cityFolder, L)
 	scoutRoot = buildScout(cityFolder, scoutPos, Vector3.new(L.plaza.X, gy + 3, L.plaza.Z))
 	-- Theke vor dem Fashion District (erste Ladenfront links)
 	shopRoot = buildShop(cityFolder, Vector3.new(L.plaza.X - 56, gy, L.plaza.Z - 42 - 22 + 18))
+	-- Speicher wählen: Studio-Testmodus (Attrappe) > DataStore in veröffentlichten Places > kein Speichern
+	local storeObj
+	if RunService:IsStudio() and workspace:GetAttribute("UP_CareerMemoryStore") == true then
+		memoryStore = CareerStore.memory()
+		storeObj = memoryStore
+	elseif game.PlaceId ~= 0 then
+		local ok, ds = pcall(function() return DataStoreService:GetDataStore("UP_Career_v1") end)
+		if ok then storeObj = ds else warn("[Career] DataStore nicht verfügbar: " .. tostring(ds)) end
+	end
+	if storeObj then
+		persist = CareerStore.new(storeObj, { jobId = game.JobId ~= "" and game.JobId or ("studio-" .. HttpService:GenerateGUID(false)),
+			items = ITEM, stages = #STAGES })
+		task.spawn(autosaveLoop)
+		if memoryStore then testHook() end
+	end
+	print("[Career] Speicherstand: " .. (memoryStore and "Studio-Attrappe" or storeObj and "DataStore UP_Career_v1" or "aus (nur diese Sitzung)"))
 	remote.OnServerEvent:Connect(onRequest)
 	Players.PlayerAdded:Connect(onPlayer)
 	for _, p in ipairs(Players:GetPlayers()) do onPlayer(p) end
 	Players.PlayerRemoving:Connect(function(plr)
-		data[plr] = nil
-		lastRequest[plr] = nil
+		local d = data[plr]
+		if d then finalSave(plr, d) end
+	end)
+	-- Herunterfahren: alle noch offenen Stände speichern und bis zu 25 s auf laufende Vorgänge warten
+	game:BindToClose(function()
+		for plr, d in pairs(data) do task.spawn(finalSave, plr, d) end
+		local t0 = os.clock()
+		task.wait()
+		while pending > 0 and os.clock() - t0 < 25 do task.wait(0.2) end
 	end)
 end
 

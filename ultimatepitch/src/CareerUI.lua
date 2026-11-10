@@ -39,7 +39,7 @@ function CareerUI.start(gui, remote)
 	local player = Players.LocalPlayer
 
 	------------------------------------------------------------ Coins und Stufe (linker Rand, mittig: oben links liegen Roblox-Chat und Anzeigetafel)
-	local chip = corner(make("Frame", { Position = UDim2.new(0, 16, 0.4, 0), Size = UDim2.fromOffset(196, 52),
+	local chip = corner(make("Frame", { Position = UDim2.new(0, 16, 0.4, 0), Size = UDim2.fromOffset(196, 68),
 		BackgroundColor3 = PANEL, BackgroundTransparency = 0.15 }, gui), 8)
 	make("UIStroke", { Color = GOLD, Thickness = 1.5, Transparency = 0.35 }, chip)
 	local coinIcon = corner(make("Frame", { Position = UDim2.fromOffset(10, 9), Size = UDim2.fromOffset(20, 20), BackgroundColor3 = GOLD, Rotation = 45 }, chip), 4)
@@ -49,6 +49,22 @@ function CareerUI.start(gui, remote)
 		Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = GOLD, Text = "0" }, chip)
 	local stageLabel = make("TextLabel", { Position = UDim2.fromOffset(10, 31), Size = UDim2.new(1, -20, 0, 16), TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.2, Text = "" }, chip)
+	-- Speicherstatus (vom Server gesetzt): geladen/gespeichert, lädt, nur diese Sitzung, gestört
+	local saveLabel = make("TextLabel", { Position = UDim2.fromOffset(10, 48), Size = UDim2.new(1, -20, 0, 14), TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left, Text = "" }, chip)
+	local SAVE_TEXT = {
+		loading = { "● SPIELSTAND LÄDT …", Color3.fromRGB(190, 205, 230) },
+		ok = { "● AUTOSAVE AN", Color3.fromRGB(70, 255, 150) },
+		off = { "● OHNE SPEICHERN (TEST)", Color3.fromRGB(150, 156, 172) },
+		error = { "● SPEICHERN GESTÖRT", Color3.fromRGB(255, 110, 110) },
+		lost = { "● ANDERER SERVER", Color3.fromRGB(255, 110, 110) },
+	}
+	local function refreshSave()
+		local t = SAVE_TEXT[player:GetAttribute("CareerSave") or "loading"] or SAVE_TEXT.loading
+		saveLabel.Text, saveLabel.TextColor3 = t[1], t[2]
+	end
+	player:GetAttributeChangedSignal("CareerSave"):Connect(refreshSave)
+	refreshSave()
 
 	local shown = 0
 	local function refreshCoins()
@@ -80,7 +96,7 @@ function CareerUI.start(gui, remote)
 	refreshStage()
 
 	------------------------------------------------------------ Meldungen (links unter den Coins, gestapelt)
-	local toastBox = make("Frame", { Position = UDim2.new(0, 16, 0.4, 60), Size = UDim2.fromOffset(340, 240),
+	local toastBox = make("Frame", { Position = UDim2.new(0, 16, 0.4, 76), Size = UDim2.fromOffset(340, 240),
 		BackgroundTransparency = 1 }, gui)
 	make("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Left, SortOrder = Enum.SortOrder.LayoutOrder }, toastBox)
 	local toastSeq = 0

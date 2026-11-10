@@ -1,5 +1,5 @@
 ﻿# Baut aus src/ die Place-Datei (.rbxlx) und den Command-Bar-Installer (PowerShell-Gegenstück zu build.py).
-#   ServerScriptService.UltimatePitchServer (Script)          <- src/Server.server.lua, Kind-Module Dome, City, Career <- src/*.lua
+#   ServerScriptService.UltimatePitchServer (Script)          <- src/Server.server.lua, Kind-Module Dome, City, Career, CareerStore <- src/*.lua
 #   StarterPlayerScripts.UltimatePitchClient (LocalScript)    <- src/Client.client.lua, Kind-Module AuroraFX, Matchday, CareerUI <- src/*.lua
 # Aufruf: powershell -ExecutionPolicy Bypass -File build.ps1
 $ErrorActionPreference = "Stop"
@@ -19,6 +19,7 @@ $city = Src "City.lua"
 $aurora = Src "AuroraFX.lua"
 $matchday = Src "Matchday.lua"
 $career = Src "Career.lua"
+$careerStore = Src "CareerStore.lua"
 $careerUi = Src "CareerUI.lua"
 
 function Item([string]$cls, [string]$ref, [string]$name, [string]$src, [string]$children) {
@@ -34,7 +35,7 @@ $rbxlx = "<roblox version=`"4`">`n" +
     "<Item class=`"Lighting`" referent=`"RBX8`"><Properties><string name=`"Name`">Lighting</string>" +
     "<token name=`"LightingStyle`">0</token><bool name=`"PrioritizeLightingQuality`">false</bool></Properties></Item>`n" +
     "<Item class=`"ServerScriptService`" referent=`"RBX1`"><Properties><string name=`"Name`">ServerScriptService</string></Properties>`n" +
-    (Item "Script" "RBX2" "UltimatePitchServer" $server ((Item "ModuleScript" "RBX6" "Dome" $dome "") + (Item "ModuleScript" "RBX10" "City" $city "") + (Item "ModuleScript" "RBX11" "Career" $career "")))+ "`n" +
+    (Item "Script" "RBX2" "UltimatePitchServer" $server ((Item "ModuleScript" "RBX6" "Dome" $dome "") + (Item "ModuleScript" "RBX10" "City" $city "") + (Item "ModuleScript" "RBX11" "Career" $career "") + (Item "ModuleScript" "RBX13" "CareerStore" $careerStore ""))) + "`n" +
     "</Item>`n" +
     "<Item class=`"StarterPlayer`" referent=`"RBX3`"><Properties><string name=`"Name`">StarterPlayer</string></Properties>`n" +
     "<Item class=`"StarterPlayerScripts`" referent=`"RBX4`"><Properties><string name=`"Name`">StarterPlayerScripts</string></Properties>`n" +
@@ -76,6 +77,7 @@ $installer = "-- UltimatePitch v$V – Command-Bar-Installer (Alternative zur .r
     "local sd = Instance.new(`"ModuleScript`") sd.Name = `"Dome`" sd.Source = [==[$dome]==] sd.Parent = s`n" +
     "local sc = Instance.new(`"ModuleScript`") sc.Name = `"City`" sc.Source = [==[$city]==] sc.Parent = s`n" +
     "local sk = Instance.new(`"ModuleScript`") sk.Name = `"Career`" sk.Source = [==[$career]==] sk.Parent = s`n" +
+    "local sp = Instance.new(`"ModuleScript`") sp.Name = `"CareerStore`" sp.Source = [==[$careerStore]==] sp.Parent = s`n" +
     "local c = Instance.new(`"LocalScript`") c.Name = `"UltimatePitchClient`" c.Source = [==[$client]==]`n" +
     "local ca = Instance.new(`"ModuleScript`") ca.Name = `"AuroraFX`" ca.Source = [==[$aurora]==] ca.Parent = c`n" +
     "local cm = Instance.new(`"ModuleScript`") cm.Name = `"Matchday`" cm.Source = [==[$matchday]==] cm.Parent = c`n" +
