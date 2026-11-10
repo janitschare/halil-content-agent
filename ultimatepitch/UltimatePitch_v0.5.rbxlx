@@ -17,9 +17,10 @@ for _, pair in ipairs({
 	local obj = pair[1]:FindFirstChild(pair[2])
 	if obj then obj:Destroy() end
 end
-for _, d in ipairs(workspace:GetDescendants()) do
-	if d:IsA("SpawnLocation") then d.Enabled = false end
-end
+-- Open-World-Regel (M1): Dieses Skript besitzt nur seine eigenen Objekte – workspace.UltimatePitch,
+-- ReplicatedStorage.UltimatePitch, die Teams Lobby/Rot/Blau und die Lighting-Effekte UP_*. Alles andere in der
+-- Place (z. B. ein handgebauter Stadtbezirk unter workspace.UltimateCity samt eigener SpawnLocations) wird
+-- weder gelöscht noch deaktiviert oder umgefärbt. Fremde SpawnLocations bleiben deshalb aktiv.
 local oldServer = game:GetService("ServerScriptService"):FindFirstChild("UltimatePitchServer")
 if oldServer and oldServer ~= script then oldServer:Destroy() end
 
@@ -229,17 +230,19 @@ for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	if o then o:Destroy() end
 end
 pcall(function()
-	Lighting.ClockTime = 20.3
-	Lighting.Brightness = 1.5
-	Lighting.OutdoorAmbient = Color3.fromRGB(120, 140, 185)
-	Lighting.Ambient = Color3.fromRGB(60, 72, 120)
+	-- Grundlicht der Welt (später Nachmittag). Das Nachtspiel-Licht des SPECTRA DOME ist kein globaler
+	-- Zustand mehr: jeder Client blendet es lokal ein, solange seine Kamera im Stadion ist (Client: Zonenlicht).
+	Lighting.ClockTime = 16.6
+	Lighting.Brightness = 2.2
+	Lighting.OutdoorAmbient = Color3.fromRGB(140, 142, 150)
+	Lighting.Ambient = Color3.fromRGB(92, 96, 110)
 	Lighting.EnvironmentDiffuseScale = 0.6
 	Lighting.EnvironmentSpecularScale = 0.8
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.26, Offset = 0.1, Color = Color3.fromRGB(40, 70, 170),
-	Decay = Color3.fromRGB(20, 30, 90), Glare = 0.4, Haze = 1.4 }, Lighting)
-new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.9, Size = 30, Threshold = 1.05 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.05, Contrast = 0.16, Saturation = 0.3, TintColor = Color3.fromRGB(228, 236, 255) }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.28, Offset = 0.1, Color = Color3.fromRGB(190, 205, 230),
+	Decay = Color3.fromRGB(120, 140, 170), Glare = 0.1, Haze = 1.2 }, Lighting)
+new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.4, Size = 24, Threshold = 1.2 }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0, Contrast = 0.08, Saturation = 0.12, TintColor = Color3.new(1, 1, 1) }, Lighting)
 
 end
 
@@ -265,6 +268,7 @@ end
 
 local CFG = {
 	MatchTime = 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
+	AutoQueue = true, -- jeden Spieler beim Beitritt fürs Match anmelden (false, sobald die Stadt einen eigenen Einstieg hat)
 	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
 	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
@@ -329,6 +333,18 @@ local function msg(t)
 	State:SetAttribute("MessageId", (State:GetAttribute("MessageId") or 0) + 1)
 end
 local function inMatch() return phase == "Playing" or phase == "GoldenGoal" end
+
+-- Teilnahme (M1): Das Match erfasst nur angemeldete Spieler (Player-Attribut UP_InMatchQueue, ausschließlich
+-- serverseitig gesetzt). Wer nicht angemeldet ist, wird weder eingeteilt noch teleportiert. Solange es
+-- außer dem Stadion nichts gibt, meldet AutoQueue jeden Spieler beim Beitritt automatisch an.
+local function queued(plr) return plr:GetAttribute("UP_InMatchQueue") == true end
+local function queuedPlayers()
+	local list = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if queued(plr) then table.insert(list, plr) end
+	end
+	return list
+end
 
 local function slotPos(td, slot)
 	local s = SLOTS[slot]
@@ -898,7 +914,7 @@ end
 local function setupTeams()
 	clearBots()
 	roster = { Rot = {}, Blau = {} }
-	local list = Players:GetPlayers()
+	local list = queuedPlayers()
 	for i = #list, 2, -1 do
 		local j = math.random(i)
 		list[i], list[j] = list[j], list[i]
@@ -926,6 +942,8 @@ local function cleanup()
 	clearBots()
 	roster = { Rot = {}, Blau = {} }
 	for _, plr in ipairs(Players:GetPlayers()) do
+		-- nur Matchteilnehmer zurück in die Lobby; alle anderen Spieler bleiben, wo sie sind
+		if not TEAM[plr.Team and plr.Team.Name] then continue end
 		plr.Team = LobbyTeam
 		local char = plr.Character
 		if char then
@@ -1124,18 +1142,48 @@ end
 local function onCharacter(plr)
 	task.wait(0.2)
 	local teamName, slot = findPlayerSlot(plr)
-	if not teamName and (inMatch() or phase == "Goal") then
+	if not teamName and queued(plr) and (inMatch() or phase == "Goal") then
 		teamName, slot = joinRunningMatch(plr)
 	end
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
 		placePlayer(plr, teamName, slot)
 	elseif plr.Character then
-		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		-- nur angemeldete Spieler in die Stadion-Lobby holen; alle anderen spawnen, wo die Welt sie hinstellt
+		if queued(plr) then teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0)) end
 		plr.Character:SetAttribute("BaseSpeed", 16)
 	end
 end
 
+-- Abmeldung während eines Matches: Platz geht an einen Bot, der Spieler kehrt in die Lobby zurück
+local function leaveMatch(plr)
+	local teamName, slot = findPlayerSlot(plr)
+	if not teamName then return end
+	if auroraHold and auroraHold.player == plr then auroraHold = nil end
+	roster[teamName][slot] = { kind = "bot", model = makeBot(TEAM[teamName], slot) }
+	plr.Team = LobbyTeam
+	local char = plr.Character
+	if char then
+		highlight(char, nil)
+		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = 16 end
+		char:SetAttribute("BaseSpeed", 16)
+	end
+end
+
 local function onPlayer(plr)
+	if plr:GetAttribute("UP_InMatchQueue") == nil then plr:SetAttribute("UP_InMatchQueue", CFG.AutoQueue) end
+	plr:GetAttributeChangedSignal("UP_InMatchQueue"):Connect(function()
+		if queued(plr) then
+			-- Anmeldung während eines laufenden Matches: wie ein Spät-Beitritt
+			if (inMatch() or phase == "Goal") and not findPlayerSlot(plr) and plr.Character then
+				local teamName, slot = joinRunningMatch(plr)
+				if teamName then placePlayer(plr, teamName, slot) end
+			end
+		elseif phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
+			leaveMatch(plr)
+		end
+	end)
 	plr.CharacterAdded:Connect(function() onCharacter(plr) end)
 	if plr.Character then task.spawn(onCharacter, plr) end
 end
@@ -1341,9 +1389,9 @@ local function gameLoop(gen)
 		loopBeat = os.clock()
 		setPhase("Lobby")
 		State:SetAttribute("TimeLeft", 0)
-		if #Players:GetPlayers() < CFG.MinPlayers then
+		if #queuedPlayers() < CFG.MinPlayers then
 			msg("Warte auf Spieler …")
-			repeat task.wait(1); loopBeat = os.clock() until #Players:GetPlayers() >= CFG.MinPlayers or gen ~= loopGen
+			repeat task.wait(1); loopBeat = os.clock() until #queuedPlayers() >= CFG.MinPlayers or gen ~= loopGen
 		end
 		if gen ~= loopGen then return end
 		setPhase("Intermission")
@@ -1352,7 +1400,7 @@ local function gameLoop(gen)
 			task.wait(1)
 			loopBeat = os.clock()
 		end
-		if #Players:GetPlayers() >= CFG.MinPlayers and gen == loopGen then
+		if #queuedPlayers() >= CFG.MinPlayers and gen == loopGen then
 			local ok, err = pcall(runMatch)
 			if not ok then
 				warn("[UltimatePitch] " .. tostring(err))
@@ -2030,8 +2078,7 @@ local function applyProfile(name)
 	for _, l in ipairs(CollectionService:GetTagged("UP_FieldLight")) do styleLight(l) end
 	local bloom = Lighting:FindFirstChild("UP_Bloom")
 	if bloom then bloom.Enabled = name ~= "Niedrig" end
-	local atmo = Lighting:FindFirstChild("UP_Atmosphere")
-	if atmo then atmo.Density = name == "Niedrig" and 0.12 or 0.26 end
+	-- die Atmosphären-Dichte setzt das Zonenlicht (unten) passend zum Profil
 	AuroraFX.fxScale = name == "Niedrig" and 0.5 or 1
 	gfxLabel.Text = "GRAFIK: " .. string.upper(name) .. (touchOnly and "" or "  (G)")
 end
@@ -2046,6 +2093,55 @@ CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if prof
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())
 task.delay(3, function() applyProfile(profile) end) -- Lighting-Effekte entstehen serverseitig evtl. später
+---------------------------------------------------------------- Zonenlicht (nur lokale Darstellung)
+-- Das Nachtspiel-Licht gehört zum SPECTRA DOME, nicht zur ganzen Welt: Ist die Kamera im Stadion, blendet
+-- dieser Client in ~1 s vom Grundlicht der Welt (Server: später Nachmittag) auf das Stadionlicht über und
+-- beim Verlassen wieder zurück. Andere Spieler und der Server sind davon nicht betroffen.
+local DOME_A, DOME_B, DOME_TOP = 178, 134, 58 -- Außenkante des Kessels (Halbachsen X/Z) und Dachhöhe
+local ZONE = {
+	city = { clock = 16.6, brightness = 2.2, outdoor = Color3.fromRGB(140, 142, 150), ambient = Color3.fromRGB(92, 96, 110),
+		density = 0.28, atmoColor = Color3.fromRGB(190, 205, 230), decay = Color3.fromRGB(120, 140, 170), glare = 0.1, haze = 1.2,
+		bloom = 0.4, bloomSize = 24, threshold = 1.2, ccBright = 0, contrast = 0.08, saturation = 0.12, tint = Color3.new(1, 1, 1) },
+	dome = { clock = 20.3, brightness = 1.5, outdoor = Color3.fromRGB(120, 140, 185), ambient = Color3.fromRGB(60, 72, 120),
+		density = 0.26, atmoColor = Color3.fromRGB(40, 70, 170), decay = Color3.fromRGB(20, 30, 90), glare = 0.4, haze = 1.4,
+		bloom = 0.9, bloomSize = 30, threshold = 1.05, ccBright = 0.05, contrast = 0.16, saturation = 0.3, tint = Color3.fromRGB(228, 236, 255) },
+}
+local zoneK, zoneApplied, zoneProfile = nil, nil, nil
+local function applyZone(k)
+	local a, b = ZONE.city, ZONE.dome
+	local function n(key) return a[key] + (b[key] - a[key]) * k end
+	local function c(key) return a[key]:Lerp(b[key], k) end
+	Lighting.ClockTime = n("clock")
+	Lighting.Brightness = n("brightness")
+	Lighting.OutdoorAmbient = c("outdoor")
+	Lighting.Ambient = c("ambient")
+	local atmo = Lighting:FindFirstChild("UP_Atmosphere")
+	if atmo then
+		atmo.Density = n("density") * (profile == "Niedrig" and 0.46 or 1)
+		atmo.Color, atmo.Decay, atmo.Glare, atmo.Haze = c("atmoColor"), c("decay"), n("glare"), n("haze")
+	end
+	local bloom = Lighting:FindFirstChild("UP_Bloom")
+	if bloom then bloom.Intensity, bloom.Size, bloom.Threshold = n("bloom"), n("bloomSize"), n("threshold") end
+	local cc = Lighting:FindFirstChild("UP_Color")
+	if cc then cc.Brightness, cc.Contrast, cc.Saturation, cc.TintColor = n("ccBright"), n("contrast"), n("saturation"), c("tint") end
+end
+RunService.RenderStepped:Connect(function(dt)
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local p = cam.CFrame.Position
+	local inside = (p.X / DOME_A) ^ 2 + (p.Z / DOME_B) ^ 2 < 1 and p.Y < DOME_TOP
+	local target = inside and 1 or 0
+	if zoneK == nil then zoneK = target end -- beim Start ohne Überblendung
+	if zoneK ~= target then
+		zoneK = math.clamp(zoneK + (target > zoneK and 1 or -1) * dt, 0, 1)
+	end
+	-- nur schreiben, wenn sich etwas geändert hat (Blendwert oder Grafikprofil)
+	if zoneK ~= zoneApplied or profile ~= zoneProfile then
+		zoneApplied, zoneProfile = zoneK, profile
+		applyZone(zoneK)
+	end
+end)
+
 local function cycleProfile()
 	local i = table.find(PROFILES, profile) or 1
 	applyProfile(PROFILES[i % #PROFILES + 1])

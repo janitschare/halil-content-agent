@@ -283,8 +283,7 @@ local function applyProfile(name)
 	for _, l in ipairs(CollectionService:GetTagged("UP_FieldLight")) do styleLight(l) end
 	local bloom = Lighting:FindFirstChild("UP_Bloom")
 	if bloom then bloom.Enabled = name ~= "Niedrig" end
-	local atmo = Lighting:FindFirstChild("UP_Atmosphere")
-	if atmo then atmo.Density = name == "Niedrig" and 0.12 or 0.26 end
+	-- die Atmosphären-Dichte setzt das Zonenlicht (unten) passend zum Profil
 	AuroraFX.fxScale = name == "Niedrig" and 0.5 or 1
 	gfxLabel.Text = "GRAFIK: " .. string.upper(name) .. (touchOnly and "" or "  (G)")
 end
@@ -299,6 +298,55 @@ CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if prof
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())
 task.delay(3, function() applyProfile(profile) end) -- Lighting-Effekte entstehen serverseitig evtl. später
+---------------------------------------------------------------- Zonenlicht (nur lokale Darstellung)
+-- Das Nachtspiel-Licht gehört zum SPECTRA DOME, nicht zur ganzen Welt: Ist die Kamera im Stadion, blendet
+-- dieser Client in ~1 s vom Grundlicht der Welt (Server: später Nachmittag) auf das Stadionlicht über und
+-- beim Verlassen wieder zurück. Andere Spieler und der Server sind davon nicht betroffen.
+local DOME_A, DOME_B, DOME_TOP = 178, 134, 58 -- Außenkante des Kessels (Halbachsen X/Z) und Dachhöhe
+local ZONE = {
+	city = { clock = 16.6, brightness = 2.2, outdoor = Color3.fromRGB(140, 142, 150), ambient = Color3.fromRGB(92, 96, 110),
+		density = 0.28, atmoColor = Color3.fromRGB(190, 205, 230), decay = Color3.fromRGB(120, 140, 170), glare = 0.1, haze = 1.2,
+		bloom = 0.4, bloomSize = 24, threshold = 1.2, ccBright = 0, contrast = 0.08, saturation = 0.12, tint = Color3.new(1, 1, 1) },
+	dome = { clock = 20.3, brightness = 1.5, outdoor = Color3.fromRGB(120, 140, 185), ambient = Color3.fromRGB(60, 72, 120),
+		density = 0.26, atmoColor = Color3.fromRGB(40, 70, 170), decay = Color3.fromRGB(20, 30, 90), glare = 0.4, haze = 1.4,
+		bloom = 0.9, bloomSize = 30, threshold = 1.05, ccBright = 0.05, contrast = 0.16, saturation = 0.3, tint = Color3.fromRGB(228, 236, 255) },
+}
+local zoneK, zoneApplied, zoneProfile = nil, nil, nil
+local function applyZone(k)
+	local a, b = ZONE.city, ZONE.dome
+	local function n(key) return a[key] + (b[key] - a[key]) * k end
+	local function c(key) return a[key]:Lerp(b[key], k) end
+	Lighting.ClockTime = n("clock")
+	Lighting.Brightness = n("brightness")
+	Lighting.OutdoorAmbient = c("outdoor")
+	Lighting.Ambient = c("ambient")
+	local atmo = Lighting:FindFirstChild("UP_Atmosphere")
+	if atmo then
+		atmo.Density = n("density") * (profile == "Niedrig" and 0.46 or 1)
+		atmo.Color, atmo.Decay, atmo.Glare, atmo.Haze = c("atmoColor"), c("decay"), n("glare"), n("haze")
+	end
+	local bloom = Lighting:FindFirstChild("UP_Bloom")
+	if bloom then bloom.Intensity, bloom.Size, bloom.Threshold = n("bloom"), n("bloomSize"), n("threshold") end
+	local cc = Lighting:FindFirstChild("UP_Color")
+	if cc then cc.Brightness, cc.Contrast, cc.Saturation, cc.TintColor = n("ccBright"), n("contrast"), n("saturation"), c("tint") end
+end
+RunService.RenderStepped:Connect(function(dt)
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local p = cam.CFrame.Position
+	local inside = (p.X / DOME_A) ^ 2 + (p.Z / DOME_B) ^ 2 < 1 and p.Y < DOME_TOP
+	local target = inside and 1 or 0
+	if zoneK == nil then zoneK = target end -- beim Start ohne Überblendung
+	if zoneK ~= target then
+		zoneK = math.clamp(zoneK + (target > zoneK and 1 or -1) * dt, 0, 1)
+	end
+	-- nur schreiben, wenn sich etwas geändert hat (Blendwert oder Grafikprofil)
+	if zoneK ~= zoneApplied or profile ~= zoneProfile then
+		zoneApplied, zoneProfile = zoneK, profile
+		applyZone(zoneK)
+	end
+end)
+
 local function cycleProfile()
 	local i = table.find(PROFILES, profile) or 1
 	applyProfile(PROFILES[i % #PROFILES + 1])

@@ -13,9 +13,10 @@ for _, pair in ipairs({
 	local obj = pair[1]:FindFirstChild(pair[2])
 	if obj then obj:Destroy() end
 end
-for _, d in ipairs(workspace:GetDescendants()) do
-	if d:IsA("SpawnLocation") then d.Enabled = false end
-end
+-- Open-World-Regel (M1): Dieses Skript besitzt nur seine eigenen Objekte – workspace.UltimatePitch,
+-- ReplicatedStorage.UltimatePitch, die Teams Lobby/Rot/Blau und die Lighting-Effekte UP_*. Alles andere in der
+-- Place (z. B. ein handgebauter Stadtbezirk unter workspace.UltimateCity samt eigener SpawnLocations) wird
+-- weder gelöscht noch deaktiviert oder umgefärbt. Fremde SpawnLocations bleiben deshalb aktiv.
 local oldServer = game:GetService("ServerScriptService"):FindFirstChild("UltimatePitchServer")
 if oldServer and oldServer ~= script then oldServer:Destroy() end
 
@@ -225,17 +226,19 @@ for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	if o then o:Destroy() end
 end
 pcall(function()
-	Lighting.ClockTime = 20.3
-	Lighting.Brightness = 1.5
-	Lighting.OutdoorAmbient = Color3.fromRGB(120, 140, 185)
-	Lighting.Ambient = Color3.fromRGB(60, 72, 120)
+	-- Grundlicht der Welt (später Nachmittag). Das Nachtspiel-Licht des SPECTRA DOME ist kein globaler
+	-- Zustand mehr: jeder Client blendet es lokal ein, solange seine Kamera im Stadion ist (Client: Zonenlicht).
+	Lighting.ClockTime = 16.6
+	Lighting.Brightness = 2.2
+	Lighting.OutdoorAmbient = Color3.fromRGB(140, 142, 150)
+	Lighting.Ambient = Color3.fromRGB(92, 96, 110)
 	Lighting.EnvironmentDiffuseScale = 0.6
 	Lighting.EnvironmentSpecularScale = 0.8
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.26, Offset = 0.1, Color = Color3.fromRGB(40, 70, 170),
-	Decay = Color3.fromRGB(20, 30, 90), Glare = 0.4, Haze = 1.4 }, Lighting)
-new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.9, Size = 30, Threshold = 1.05 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.05, Contrast = 0.16, Saturation = 0.3, TintColor = Color3.fromRGB(228, 236, 255) }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.28, Offset = 0.1, Color = Color3.fromRGB(190, 205, 230),
+	Decay = Color3.fromRGB(120, 140, 170), Glare = 0.1, Haze = 1.2 }, Lighting)
+new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.4, Size = 24, Threshold = 1.2 }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0, Contrast = 0.08, Saturation = 0.12, TintColor = Color3.new(1, 1, 1) }, Lighting)
 
 end
 
@@ -261,6 +264,7 @@ end
 
 local CFG = {
 	MatchTime = 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
+	AutoQueue = true, -- jeden Spieler beim Beitritt fürs Match anmelden (false, sobald die Stadt einen eigenen Einstieg hat)
 	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
 	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
@@ -325,6 +329,18 @@ local function msg(t)
 	State:SetAttribute("MessageId", (State:GetAttribute("MessageId") or 0) + 1)
 end
 local function inMatch() return phase == "Playing" or phase == "GoldenGoal" end
+
+-- Teilnahme (M1): Das Match erfasst nur angemeldete Spieler (Player-Attribut UP_InMatchQueue, ausschließlich
+-- serverseitig gesetzt). Wer nicht angemeldet ist, wird weder eingeteilt noch teleportiert. Solange es
+-- außer dem Stadion nichts gibt, meldet AutoQueue jeden Spieler beim Beitritt automatisch an.
+local function queued(plr) return plr:GetAttribute("UP_InMatchQueue") == true end
+local function queuedPlayers()
+	local list = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if queued(plr) then table.insert(list, plr) end
+	end
+	return list
+end
 
 local function slotPos(td, slot)
 	local s = SLOTS[slot]
@@ -894,7 +910,7 @@ end
 local function setupTeams()
 	clearBots()
 	roster = { Rot = {}, Blau = {} }
-	local list = Players:GetPlayers()
+	local list = queuedPlayers()
 	for i = #list, 2, -1 do
 		local j = math.random(i)
 		list[i], list[j] = list[j], list[i]
@@ -922,6 +938,8 @@ local function cleanup()
 	clearBots()
 	roster = { Rot = {}, Blau = {} }
 	for _, plr in ipairs(Players:GetPlayers()) do
+		-- nur Matchteilnehmer zurück in die Lobby; alle anderen Spieler bleiben, wo sie sind
+		if not TEAM[plr.Team and plr.Team.Name] then continue end
 		plr.Team = LobbyTeam
 		local char = plr.Character
 		if char then
@@ -1120,18 +1138,48 @@ end
 local function onCharacter(plr)
 	task.wait(0.2)
 	local teamName, slot = findPlayerSlot(plr)
-	if not teamName and (inMatch() or phase == "Goal") then
+	if not teamName and queued(plr) and (inMatch() or phase == "Goal") then
 		teamName, slot = joinRunningMatch(plr)
 	end
 	if teamName and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
 		placePlayer(plr, teamName, slot)
 	elseif plr.Character then
-		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		-- nur angemeldete Spieler in die Stadion-Lobby holen; alle anderen spawnen, wo die Welt sie hinstellt
+		if queued(plr) then teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0)) end
 		plr.Character:SetAttribute("BaseSpeed", 16)
 	end
 end
 
+-- Abmeldung während eines Matches: Platz geht an einen Bot, der Spieler kehrt in die Lobby zurück
+local function leaveMatch(plr)
+	local teamName, slot = findPlayerSlot(plr)
+	if not teamName then return end
+	if auroraHold and auroraHold.player == plr then auroraHold = nil end
+	roster[teamName][slot] = { kind = "bot", model = makeBot(TEAM[teamName], slot) }
+	plr.Team = LobbyTeam
+	local char = plr.Character
+	if char then
+		highlight(char, nil)
+		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = 16 end
+		char:SetAttribute("BaseSpeed", 16)
+	end
+end
+
 local function onPlayer(plr)
+	if plr:GetAttribute("UP_InMatchQueue") == nil then plr:SetAttribute("UP_InMatchQueue", CFG.AutoQueue) end
+	plr:GetAttributeChangedSignal("UP_InMatchQueue"):Connect(function()
+		if queued(plr) then
+			-- Anmeldung während eines laufenden Matches: wie ein Spät-Beitritt
+			if (inMatch() or phase == "Goal") and not findPlayerSlot(plr) and plr.Character then
+				local teamName, slot = joinRunningMatch(plr)
+				if teamName then placePlayer(plr, teamName, slot) end
+			end
+		elseif phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
+			leaveMatch(plr)
+		end
+	end)
 	plr.CharacterAdded:Connect(function() onCharacter(plr) end)
 	if plr.Character then task.spawn(onCharacter, plr) end
 end
@@ -1337,9 +1385,9 @@ local function gameLoop(gen)
 		loopBeat = os.clock()
 		setPhase("Lobby")
 		State:SetAttribute("TimeLeft", 0)
-		if #Players:GetPlayers() < CFG.MinPlayers then
+		if #queuedPlayers() < CFG.MinPlayers then
 			msg("Warte auf Spieler …")
-			repeat task.wait(1); loopBeat = os.clock() until #Players:GetPlayers() >= CFG.MinPlayers or gen ~= loopGen
+			repeat task.wait(1); loopBeat = os.clock() until #queuedPlayers() >= CFG.MinPlayers or gen ~= loopGen
 		end
 		if gen ~= loopGen then return end
 		setPhase("Intermission")
@@ -1348,7 +1396,7 @@ local function gameLoop(gen)
 			task.wait(1)
 			loopBeat = os.clock()
 		end
-		if #Players:GetPlayers() >= CFG.MinPlayers and gen == loopGen then
+		if #queuedPlayers() >= CFG.MinPlayers and gen == loopGen then
 			local ok, err = pcall(runMatch)
 			if not ok then
 				warn("[UltimatePitch] " .. tostring(err))
