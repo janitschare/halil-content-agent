@@ -389,6 +389,8 @@ Matchday.start(State, gui, {
 	isStadium = function() return State:GetAttribute("ArenaId") == "Stadium" end,
 })
 CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if profile then styleCrowd(p) end end)
+-- Karriere (M3): Pitch Coins, Stufe, Meldungen, Scout-Gespräch und Shop (nur Anzeige, Werte vom Server)
+require(script:WaitForChild("CareerUI")).start(gui, RS:WaitForChild("UltimatePitch"):WaitForChild("Career"))
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())
 task.delay(3, function() applyProfile(profile) end) -- Lighting-Effekte entstehen serverseitig evtl. später

@@ -254,7 +254,7 @@ function City.build(parent, L)
 	part({ Name = "CourtWalk", Size = Vector3.new(math.abs(L.courtPad.X - (px + 55)) + 12, 0.2, 14), Position = G((L.courtPad.X + px + 55) / 2, 0.03, L.courtPad.Z),
 		Material = Enum.Material.Slate, Color = PAVING }, city)
 
-	-- Ladenfronten als Ausblick auf die nächsten Ausbaustufen (noch ohne Funktion)
+	-- Ladenfronten: Fashion District ist seit M3 geöffnet (Theke und Shop im Career-Modul), die anderen folgen
 	local SHOPS = { { "FASHION DISTRICT", Color3.fromRGB(255, 90, 170) }, { "FOOTBALL ACADEMY", Color3.fromRGB(70, 255, 150) }, { "PLAYER AGENCY", GOLD } }
 	for i, shop in ipairs(SHOPS) do
 		local x = px - 56 + (i - 1) * 56
@@ -267,9 +267,10 @@ function City.build(parent, L)
 		local sb = part({ Name = "ShopSign", Size = Vector3.new(40, 6, 0.6), Position = G(x, 21, z + 13.4),
 			Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 14, 24) }, city)
 		sign(sb, Enum.NormalId.Back, shop[1], shop[2])
-		local soon = part({ Name = "ShopSoon", Size = Vector3.new(16, 2.4, 0.4), Position = G(x, 3.4, z + 13.5),
+		local open = i == 1
+		local soon = part({ Name = "ShopSoon", Size = Vector3.new(16, 2.4, 0.4), Position = G(x, open and 6 or 3.4, z + 13.5),
 			Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 14, 24) }, city)
-		sign(soon, Enum.NormalId.Back, "ERÖFFNET BALD", Color3.new(1, 1, 1))
+		sign(soon, Enum.NormalId.Back, open and "JETZT GEÖFFNET" or "ERÖFFNET BALD", open and shop[2] or Color3.new(1, 1, 1))
 	end
 
 	city.Parent = parent

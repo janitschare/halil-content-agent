@@ -10,6 +10,8 @@ local G = {
 }
 
 local RS = game:GetService("ReplicatedStorage")
+-- Karriere (M3): Pitch Coins, Scout, Shop – Belohnungen vergibt nur der Server am Matchende
+local Career = require(script:WaitForChild("Career"))
 local Teams = game:GetService("Teams")
 
 -- Alte Reste (v0.3-Installer) entfernen
@@ -410,6 +412,8 @@ local auroraShot = nil
 local auroraShotSeq = 0
 local ballOwner = nil -- Spieler (Mensch), der den Ball gerade führt; siehe dribble()
 local ballCarrier = nil -- Figur (Mensch oder Bot), die den Ball gerade führt
+local lastTouch = nil -- letzter Mensch am Ball (nil nach Bot-Kontakt); erhält ein Tor für sein Team gutgeschrieben
+local goalsBy = {} -- [Player] = Tore im laufenden Match (Grundlage der Karriere-Belohnung)
 local EffectEvent = SHARED:WaitForChild("Effect")
 
 -- Gewollter Server-Teleport: Bezugspunkt der Bewegungsprüfung mitziehen, sonst würde sie zurücksetzen
@@ -457,6 +461,7 @@ end
 ---------------------------------------------------------------- Ball
 local function resetBall()
 	auroraShot = nil
+	lastTouch = nil -- nach Anstoß/Ball-Reset zählt erst die nächste echte Berührung
 	Ball.AssemblyLinearVelocity = Vector3.zero
 	Ball.AssemblyAngularVelocity = Vector3.zero
 	Ball.CFrame = CFrame.new(OX, CFG.GroundY + 3, OZ)
@@ -467,6 +472,7 @@ end
 local lastBallKickAt = 0 -- Zeitpunkt der letzten Schuss-/Passaktion: kurz danach kein Dribbel-Fangen
 local function kickBall(vel, kicker)
 	lastBallKickAt = os.clock()
+	lastTouch = kicker and Players:GetPlayerFromCharacter(kicker) or nil
 	auroraShot = nil -- jede neue Ballaktion beendet die Zuordnung zum letzten AURORA-Schuss
 	local k = Ball:FindFirstChild("Kick")
 	if k then
@@ -570,6 +576,7 @@ local function applyKit(char, td, slot)
 		kitLabel(torso, Enum.NormalId.Front, "UP", 0.32, kit.trim, "KitBadge")
 	end
 	char:SetAttribute("KitTeam", td.name)
+	Career.decorate(char) -- gekaufte Optik (Schuhe, Binde, Rückennummer); Bots bleiben unverändert
 	-- Namensschild im Broadcast-Stil (Nummer in Trikotfarbe + Name) statt des Standard-Humanoid-Namens
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end
@@ -1097,6 +1104,7 @@ local function runMatch()
 	scores = { Rot = 0, Blau = 0 }
 	updateScore()
 	pendingGoal = nil
+	goalsBy, lastTouch = {}, nil
 	local timeLeft = CFG.MatchTime
 	local golden = false
 	local winner = nil
@@ -1163,6 +1171,19 @@ local function runMatch()
 	sfx("Whistle")
 	task.wait(golden and winner and 2 or 0)
 	msg(winner and ("Team " .. winner .. " gewinnt " .. scores.Rot .. ":" .. scores.Blau .. "!") or "Spiel abgebrochen")
+	-- Karriere: nur vollständig gespielte Matches (mit Sieger) werden belohnt, nur Spieler, die bis zum Ende dabei sind
+	if winner then
+		local results = {}
+		for teamName, slots in pairs(roster) do
+			for _, e in pairs(slots) do
+				if e.kind == "player" and e.player.Parent and e.player:GetAttribute("UP_Arena") == A.id then
+					table.insert(results, { player = e.player, won = teamName == winner, goals = goalsBy[e.player] or 0 })
+				end
+			end
+		end
+		Career.onMatchEnd(A.id, results)
+	end
+	goalsBy = {}
 	task.wait(CFG.EndPause)
 	cleanup()
 end
@@ -1239,6 +1260,7 @@ local function releaseAurora()
 	local td = TEAM[plr.Team and plr.Team.Name]
 	local look = unit(flat(root.CFrame.LookVector), Vector3.new(td and td.sign or 1, 0, 0))
 	kickBall(look * CFG.AuroraSpeed + Vector3.new(0, CFG.AuroraLift, 0))
+	lastTouch = plr
 	auroraShotSeq += 1
 	auroraShot = { id = auroraShotSeq, player = plr, team = plr.Team and plr.Team.Name,
 		expires = os.clock() + CFG.AuroraGoalWindow }
@@ -1366,6 +1388,7 @@ local function setCarrier(model, plr)
 		ballCarrier = model
 		CarrierValue.Value = model
 	end
+	if model then lastTouch = plr end
 	if ballOwner ~= plr then
 		ballOwner = plr
 		State:SetAttribute("BallOwner", plr and plr.UserId or 0)
@@ -1465,6 +1488,11 @@ RunService.Heartbeat:Connect(function(dt)
 		if pendingGoal then
 			local shot = auroraShot
 			pendingGoalAurora = shot ~= nil and os.clock() < shot.expires and shot.team == pendingGoal
+			-- Torschütze nur bei Toren fürs eigene Team (kein Eigentor-Bonus)
+			local scorer = lastTouch
+			if scorer and scorer.Parent and scorer.Team and scorer.Team.Name == pendingGoal then
+				goalsBy[scorer] = (goalsBy[scorer] or 0) + 1
+			end
 			auroraShot = nil
 		end
 	end
@@ -1601,6 +1629,7 @@ createArena({ id = "StreetCourt", origin = LAYOUT.court.origin, halfLength = LAY
 	goalHalfWidth = 6, matchTime = 120, slots = { { d = 3, z = 0 }, { d = 12, z = -7 }, { d = 22, z = 7 } },
 	exitCFrame = CFrame.lookAt(Vector3.new(78, 5, -222), Vector3.new(86, 5, -235)) })
 local city = require(script:WaitForChild("City")).build(workspace:WaitForChild("UltimatePitch"), LAYOUT)
+Career.init(city.folder, LAYOUT)
 
 -- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Berührungen
 -- clientbesessener Figuren meldet der Client selbst; der Server prüft deshalb zusätzlich die tatsächliche

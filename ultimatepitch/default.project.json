@@ -8,7 +8,8 @@
       "UltimatePitchServer": {
         "$path": "src/Server.server.lua",
         "Dome": { "$path": "src/Dome.lua" },
-        "City": { "$path": "src/City.lua" }
+        "City": { "$path": "src/City.lua" },
+        "Career": { "$path": "src/Career.lua" }
       }
     },
     "StarterPlayer": {
@@ -16,7 +17,8 @@
         "UltimatePitchClient": {
           "$path": "src/Client.client.lua",
           "AuroraFX": { "$path": "src/AuroraFX.lua" },
-          "Matchday": { "$path": "src/Matchday.lua" }
+          "Matchday": { "$path": "src/Matchday.lua" },
+          "CareerUI": { "$path": "src/CareerUI.lua" }
         }
       }
     }
