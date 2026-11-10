@@ -94,7 +94,11 @@ function CareerStore.new(store, opts)
 						newer = true -- von einer neueren Spielversion geschrieben: nicht anfassen
 						return nil
 					end
-					if freshLock(old) then
+					-- eigene Sperre dieses Ladevorgangs (ein früherer Versuch hat geschrieben, nur die Antwort ging
+					-- verloren) ist kein Hindernis
+					local lock = type(old) == "table" and old.lock
+					local mine = type(lock) == "table" and lock.job == jobId and lock.sid == token
+					if not mine and freshLock(old) then
 						blocked = true
 						return nil
 					end
@@ -130,11 +134,13 @@ function CareerStore.new(store, opts)
 					lost = false
 					local lock = type(old) == "table" and old.lock
 					if type(lock) ~= "table" or lock.sid ~= token or lock.job ~= jobId then
+						-- Freigabe dieses Ladevorgangs wurde bereits geschrieben (Antwort ging verloren): erledigt
+						if release and lock == nil and type(old) == "table" and old.releasedBy == token then return nil end
 						lost = true
 						return nil
 					end
 					local rec = CareerStore.serialize(data)
-					if not release then rec.lock = { job = jobId, sid = token, t = now() } end
+					if release then rec.releasedBy = token else rec.lock = { job = jobId, sid = token, t = now() } end
 					return rec, { userId }
 				end)
 			end)
@@ -149,9 +155,10 @@ function CareerStore.new(store, opts)
 end
 
 -- Speicher-Attrappe mit derselben UpdateAsync-Schnittstelle: Werte werden wie im echten Store als JSON abgelegt.
--- failNext = n lässt die nächsten n Zugriffe mit einem Fehler scheitern. Für Selbsttests und den Studio-Testmodus.
+-- failNext = n lässt die nächsten n Zugriffe vor dem Schreiben scheitern; failAfterWrite = n schreibt bei den nächsten
+-- n Zugriffen und meldet danach trotzdem einen Fehler (verlorene Antwort). Für Selbsttests und den Studio-Testmodus.
 function CareerStore.memory()
-	local m = { data = {}, failNext = 0, calls = 0 }
+	local m = { data = {}, failNext = 0, failAfterWrite = 0, calls = 0 }
 	function m:UpdateAsync(k, fn)
 		self.calls += 1
 		if self.failNext > 0 then
@@ -161,6 +168,10 @@ function CareerStore.memory()
 		local old = self.data[k] and HttpService:JSONDecode(self.data[k]) or nil
 		local new = fn(old)
 		if new ~= nil then self.data[k] = HttpService:JSONEncode(new) end
+		if self.failAfterWrite > 0 then
+			self.failAfterWrite -= 1
+			error("simulierter Fehler nach dem Schreiben")
+		end
 		return new
 	end
 	function m:read(k)

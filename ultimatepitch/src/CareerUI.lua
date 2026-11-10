@@ -58,6 +58,7 @@ function CareerUI.start(gui, remote)
 		off = { "● OHNE SPEICHERN (TEST)", Color3.fromRGB(150, 156, 172) },
 		error = { "● SPEICHERN GESTÖRT", Color3.fromRGB(255, 110, 110) },
 		lost = { "● ANDERER SERVER", Color3.fromRGB(255, 110, 110) },
+		retry = { "● SPEICHERN STOCKT – NEUER VERSUCH", Color3.fromRGB(255, 180, 70) },
 	}
 	local function refreshSave()
 		local t = SAVE_TEXT[player:GetAttribute("CareerSave") or "loading"] or SAVE_TEXT.loading

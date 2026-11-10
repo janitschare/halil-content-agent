@@ -161,5 +161,30 @@ do
 	check("neueres Schema: error, keine Sperre, keine Aenderung", st == "error" and rec.coins == 300 and rec.lock == nil, st)
 end
 
+-- 10 Schreiben gelungen, Antwort verloren (Codex-Re-Review P2): Wiederholung erkennt die eigene Sperre bzw. Freigabe
+do
+	local m = CareerStore.memory()
+	m:write(K, { schema = 1, coins = 40 })
+	m.failAfterWrite = 1
+	waits = 0
+	local st, d, tok = mk(m, "A").load(42)
+	local rec = m:read(K)
+	check("Laden: verlorene Antwort, eigene Sperre blockiert nicht", st == "ok" and d.coins == 40 and rec.lock.sid == tok and waits == 1, st .. "/" .. waits)
+	local a = mk(m, "A", 20)
+	local _, _, tok2 = a.load(42) -- neuer Ladevorgang desselben Servers: andere Kennung, frische Sperre -> kein Laden
+	check("Laden: Sperre eines anderen Ladevorgangs bleibt respektiert", tok2 == nil)
+	m:write(K, { schema = 1, coins = 40 })
+	local b = mk(m, "B")
+	local _, _, tokB = b.load(42)
+	m.failAfterWrite = 1
+	local s1 = b.save(42, sample(55), tokB, false)
+	rec = m:read(K)
+	check("Zwischenspeichern: verlorene Antwort, Wiederholung ok", s1 == "ok" and rec.coins == 55 and rec.lock.sid == tokB, s1)
+	m.failAfterWrite = 1
+	local s2 = b.save(42, sample(66), tokB, true)
+	rec = m:read(K)
+	check("Abschluss: verlorene Antwort, Freigabe als erledigt erkannt", s2 == "ok" and rec.coins == 66 and rec.lock == nil, s2)
+end
+
 table.insert(out, string.format("SUMME: %d Fehler", fails))
 return table.concat(out, "\n")

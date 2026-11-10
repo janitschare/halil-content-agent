@@ -70,7 +70,7 @@ local function sync(plr, clean)
 	local d = data[plr]
 	if not d then return end
 	if not clean then d.dirty = true end
-	plr:SetAttribute("CareerSave", d.save)
+	plr:SetAttribute("CareerSave", (d.save == "ok" and d.saveWarn) and "retry" or d.save)
 	plr:SetAttribute("PitchCoins", d.coins)
 	plr:SetAttribute("CareerStage", STAGES[d.stage])
 	plr:SetAttribute("CareerStageIndex", d.stage)
@@ -276,11 +276,20 @@ local SAVE_MSG = {
 	lost = "Dein Spielstand wird inzwischen von einem anderen Server geführt. Fortschritt hier wird nicht mehr gespeichert.",
 }
 
+-- Anzeige und Hinweise betreffen nur die aktuelle Sitzung des Spielers (nicht einen nachgeholten Abschluss)
+local function current(plr, d)
+	return plr.Parent ~= nil and data[plr] == d
+end
+
 local function setSave(plr, d, state)
 	d.save = state
-	if plr.Parent then plr:SetAttribute("CareerSave", state) end
-	if SAVE_MSG[state] then toast(plr, SAVE_MSG[state]) end
+	if current(plr, d) then
+		plr:SetAttribute("CareerSave", state)
+		if SAVE_MSG[state] then toast(plr, SAVE_MSG[state]) end
+	end
 end
+
+local saveNow, finalSave -- weiter unten definiert
 
 -- Laden beim Betreten. Was in den Sekunden davor verdient wurde (Matchende), wird zum geladenen Stand addiert.
 local function loadPlayer(plr, d)
@@ -313,8 +322,9 @@ local function loadPlayer(plr, d)
 	d.token = token
 	d.save = "ok"
 	if d.left then
-		-- während des Ladens gegangen: Stand sofort zurückschreiben und Sperre freigeben
-		persist.save(plr.UserId, d, d.token, true)
+		-- während des Ladens gegangen: Abschluss nachholen (gleicher Fehlerpfad wie beim normalen Verlassen)
+		d.final = false
+		finalSave(plr, d)
 	else
 		sync(plr, true)
 		d.dirty = earned
@@ -322,8 +332,9 @@ local function loadPlayer(plr, d)
 	pending -= 1
 end
 
--- Ein Speicherdurchlauf für einen Spieler (nicht während eines anderen Speichervorgangs desselben Spielers)
-local function saveNow(plr, d, release)
+-- Ein Speicherdurchlauf für einen Spieler (nicht während eines anderen Speichervorgangs desselben Spielers).
+-- Schreibstörungen zeigt der Client als "retry" an, bis ein Speichern wieder gelingt.
+function saveNow(plr, d, release)
 	while d.saving do task.wait(0.1) end
 	-- nach dem letzten Speichern (Sperre freigegeben) darf kein Zwischenstand die Sperre neu setzen
 	if d.save ~= "ok" or (d.final and not release) then return end
@@ -332,35 +343,73 @@ local function saveNow(plr, d, release)
 	local status, err = persist.save(plr.UserId, d, d.token, release)
 	d.saving = false
 	if status == "lost" then
+		d.saveWarn = false
 		setSave(plr, d, "lost")
 	elseif status ~= "ok" then
 		d.dirty = true
 		warn("[Career] Speichern fehlgeschlagen für " .. plr.UserId .. ": " .. tostring(err))
+		if not d.saveWarn then
+			d.saveWarn = true
+			if current(plr, d) then plr:SetAttribute("CareerSave", "retry") end
+		end
+	elseif d.saveWarn then
+		d.saveWarn = false
+		if current(plr, d) then plr:SetAttribute("CareerSave", d.save) end
 	end
 	return status
 end
 
--- Letztes Speichern beim Verlassen oder Herunterfahren (genau einmal je Spieler, gibt die Sperre frei)
-local function finalSave(plr, d)
+-- Letztes Speichern beim Verlassen oder Herunterfahren (einmal je Spieler, gibt die Sperre frei). Scheitert es an einer
+-- Störung, bleibt der Stand in der Warteschlange retryFinal und wird vom Autosave (bis zu FINAL_TRIES-mal) bzw. beim
+-- Herunterfahren erneut geschrieben – erst danach oder bei Sperrverlust wird er verworfen.
+local FINAL_TRIES = 6
+local retryFinal = {} -- [d] = plr
+function finalSave(plr, d)
 	if d.final then return end
 	d.final, d.left = true, true
 	pending += 1
-	if persist and d.save == "ok" then saveNow(plr, d, true) end
 	if data[plr] == d then data[plr] = nil end
 	lastRequest[plr] = nil
+	if persist and d.save == "ok" then
+		d.finalTries = 1
+		if saveNow(plr, d, true) == "error" then retryFinal[d] = plr end
+	end
 	pending -= 1
+end
+
+local function retryFinalSave(d, plr)
+	if d.saving then return end
+	pending += 1
+	d.finalTries += 1
+	local status = saveNow(plr, d, true)
+	if status ~= "error" or d.finalTries >= FINAL_TRIES then
+		retryFinal[d] = nil
+		if status == "error" then warn("[Career] Abschluss endgültig fehlgeschlagen für " .. plr.UserId) end
+	end
+	pending -= 1
+end
+
+-- Ein Autosave-Durchlauf: alle aktiven Stände (auch unveränderte, damit die Sitzungssperre frisch bleibt) und
+-- ausstehende Abschlüsse. wait = false für sofortige Ausführung (Prüfschnittstelle).
+local function autosavePass(spread)
+	local n = 0
+	for plr, d in pairs(data) do
+		if d.save == "ok" and not d.left and not d.saving then
+			n += 1
+			if spread then task.spawn(saveNow, plr, d, false) task.wait(0.5) else saveNow(plr, d, false) end
+		end
+	end
+	for d, plr in pairs(retryFinal) do
+		n += 1
+		if spread then task.spawn(retryFinalSave, d, plr) task.wait(0.5) else retryFinalSave(d, plr) end
+	end
+	return n
 end
 
 local function autosaveLoop()
 	while true do
 		task.wait(AUTOSAVE)
-		for plr, d in pairs(data) do
-			-- auch unveränderte Stände speichern: nur so bleibt die Sitzungssperre frisch
-			if d.save == "ok" and not d.left and not d.saving then
-				task.spawn(saveNow, plr, d, false)
-				task.wait(0.5) -- Anfragen verteilen
-			end
-		end
+		autosavePass(true)
 	end
 end
 
@@ -379,11 +428,14 @@ local function testHook()
 			memoryStore.failNext = arg
 			return true
 		elseif cmd == "flush" then
-			local n = 0
-			for p, d in pairs(data) do
-				if d.save == "ok" and not d.left then saveNow(p, d, false) n += 1 end
-			end
-			return n
+			return autosavePass(false)
+		elseif cmd == "failAfterWrite" then
+			memoryStore.failAfterWrite = arg
+			return true
+		elseif cmd == "state" and plr then
+			local pendingFinal = 0
+			for _ in pairs(retryFinal) do pendingFinal += 1 end
+			return tostring(plr:GetAttribute("CareerSave")) .. " retryFinal=" .. pendingFinal
 		elseif cmd == "rejoin" and plr and data[plr] then
 			-- Verlassen und erneutes Betreten desselben Spielers nachstellen (gleiche Funktionen wie im Spiel);
 			-- arg (JSON) ersetzt dazwischen den gespeicherten Stand, z. B. einen älteren oder beschädigten Datensatz
@@ -463,6 +515,7 @@ function Career.init(cityFolder, L)
 	-- Herunterfahren: alle noch offenen Stände speichern und bis zu 25 s auf laufende Vorgänge warten
 	game:BindToClose(function()
 		for plr, d in pairs(data) do task.spawn(finalSave, plr, d) end
+		for d, plr in pairs(retryFinal) do task.spawn(retryFinalSave, d, plr) end
 		local t0 = os.clock()
 		task.wait()
 		while pending > 0 and os.clock() - t0 < 25 do task.wait(0.2) end
