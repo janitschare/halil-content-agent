@@ -115,7 +115,13 @@ function CareerUI.start(gui, remote)
 		local p = corner(make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(w, h),
 			BackgroundColor3 = PANEL, BackgroundTransparency = 0.05, Visible = false }, gui), 10)
 		make("UIStroke", { Color = color, Thickness = 2, Transparency = 0.2 }, p)
-		make("UISizeConstraint", { MaxSize = Vector2.new(w, h) }, p)
+		-- an kleine Bildschirme anpassen (Rand 12 px), damit der Schließen-Knopf immer erreichbar bleibt
+		local function fit()
+			local area = gui.AbsoluteSize
+			p.Size = UDim2.fromOffset(math.max(240, math.min(w, area.X - 24)), math.max(160, math.min(h, area.Y - 24)))
+		end
+		gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
+		fit()
 		make("TextLabel", { Position = UDim2.fromOffset(18, 12), Size = UDim2.new(1, -60, 0, 26), Text = title, TextSize = 20,
 			Font = Enum.Font.GothamBlack, TextColor3 = color, TextXAlignment = Enum.TextXAlignment.Left }, p)
 		local close = button(p, "X", Color3.fromRGB(60, 66, 84), { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 12),
@@ -126,11 +132,18 @@ function CareerUI.start(gui, remote)
 
 	------------------------------------------------------------ Scout-Gespräch
 	local scout = panel("TALENT-SCOUT", ACCENT, 440, 230)
-	local scoutText = make("TextLabel", { Position = UDim2.fromOffset(18, 48), Size = UDim2.new(1, -36, 0, 110), TextSize = 16, TextWrapped = true,
+	local scoutText = make("TextLabel", { Position = UDim2.fromOffset(18, 48), Size = UDim2.new(1, -36, 1, -116), TextSize = 16, TextWrapped = true,
 		Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, Text = "" }, scout)
-	local accept = button(scout, "UNTERSCHREIBEN", GOLD, { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 18, 1, -16), Size = UDim2.fromOffset(210, 42) })
+	make("UITextSizeConstraint", { MaxTextSize = 16, MinTextSize = 11 }, scoutText)
+	scoutText.TextScaled = true
+	local accept = button(scout, "UNTERSCHREIBEN", GOLD, { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 18, 1, -16),
+		Size = UDim2.new(0.58, -27, 0, 42), TextScaled = true })
 	local later = button(scout, "SPÄTER", Color3.fromRGB(60, 66, 84), { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -18, 1, -16),
-		Size = UDim2.fromOffset(150, 42), TextColor3 = Color3.new(1, 1, 1) })
+		Size = UDim2.new(0.42, -27, 0, 42), TextColor3 = Color3.new(1, 1, 1), TextScaled = true })
+	for _, b in ipairs({ accept, later }) do
+		make("UITextSizeConstraint", { MaxTextSize = 15, MinTextSize = 10 }, b)
+		make("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, b)
+	end
 	accept.Activated:Connect(function()
 		scout.Visible = false
 		remote:FireServer("AcceptScout")
@@ -141,7 +154,10 @@ function CareerUI.start(gui, remote)
 	local shop = panel("FASHION DISTRICT", PINK, 460, 360)
 	make("TextLabel", { Position = UDim2.fromOffset(18, 40), Size = UDim2.new(1, -36, 0, 18), TextSize = 12, TextTransparency = 0.3,
 		TextXAlignment = Enum.TextXAlignment.Left, Text = "Nur Optik im Matchtrikot · bezahlt mit Pitch Coins aus deinen Matches" }, shop)
-	local listFrame = make("Frame", { Position = UDim2.fromOffset(18, 66), Size = UDim2.new(1, -36, 1, -80), BackgroundTransparency = 1 }, shop)
+	-- scrollbar, falls die Liste auf kleinen Bildschirmen (Querformat) nicht ganz passt
+	local listFrame = make("ScrollingFrame", { Position = UDim2.fromOffset(18, 66), Size = UDim2.new(1, -30, 1, -80), BackgroundTransparency = 1,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 4, ScrollBarImageColor3 = PINK }, shop)
 	make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, listFrame)
 	local catalog = {}
 

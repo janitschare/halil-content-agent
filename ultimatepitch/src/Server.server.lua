@@ -412,7 +412,7 @@ local auroraShot = nil
 local auroraShotSeq = 0
 local ballOwner = nil -- Spieler (Mensch), der den Ball gerade führt; siehe dribble()
 local ballCarrier = nil -- Figur (Mensch oder Bot), die den Ball gerade führt
-local lastTouch = nil -- letzter Mensch am Ball (nil nach Bot-Kontakt); erhält ein Tor für sein Team gutgeschrieben
+local lastTouch = nil -- letzter Mensch am Ball (Kick, Dribbling, Körperkontakt; nil nach Bot-Kontakt/Reset): Tor für sein Team
 local goalsBy = {} -- [Player] = Tore im laufenden Match (Grundlage der Karriere-Belohnung)
 local EffectEvent = SHARED:WaitForChild("Effect")
 
@@ -483,14 +483,15 @@ local function kickBall(vel, kicker)
 	Ball.AssemblyLinearVelocity = vel
 	if kicker then EffectEvent:FireAllClients("KickAnim", 0, kicker, A.id) end
 end
--- Berührt eine andere Figur (Spieler oder Bot) den Ball, gehört ein späteres Tor nicht mehr zum AURORA-Schuss
+-- Körperkontakt einer Figur (Spieler oder Bot) mit dem Ball; Arena-Geometrie zählt nicht.
+-- Ein Mensch wird letzter Ballkontakt (Torschütze), ein Bot löscht ihn; eine andere Figur als der Schütze
+-- beendet außerdem die Zuordnung zum AURORA-Schuss.
 Ball.Touched:Connect(function(part)
-	local shot = auroraShot
-	if not shot then return end
 	local model = part:FindFirstAncestorOfClass("Model")
-	if model and model:FindFirstChildOfClass("Humanoid") and model ~= shot.player.Character then
-		auroraShot = nil
-	end
+	if not model or not model:FindFirstChildOfClass("Humanoid") then return end
+	lastTouch = Players:GetPlayerFromCharacter(model)
+	local shot = auroraShot
+	if shot and model ~= shot.player.Character then auroraShot = nil end
 end)
 
 ---------------------------------------------------------------- Bots
