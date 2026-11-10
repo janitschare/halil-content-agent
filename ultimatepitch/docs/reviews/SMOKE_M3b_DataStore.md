@@ -44,6 +44,25 @@ Der Test lädt das Modul seither als Klon; danach 21/21.
 `[Career] Speicherstand: aus (nur diese Sitzung)`, `CareerSave=off`, keine Prüfschnittstelle, keine Fehler, Anzeige
 „● OHNE SPEICHERN (TEST)“ (Screenshot 7). Test-Attribute vor dem Speichern der Place entfernt (geprüft: beide `nil`).
 
+## Nach dem Codex-Re-Review (`f1c99f7`, Fehlerpfade)
+
+### Selbsttest – 25/25 PASS
+Alle 21 bisherigen Fälle plus: Laden mit verlorener Antwort (Schreiben gelungen) blockiert nicht an der eigenen Sperre ·
+Sperre eines anderen Ladevorgangs desselben Servers bleibt respektiert · Zwischenspeichern mit verlorener Antwort: Wiederholung
+ok · Abschluss mit verlorener Antwort: Freigabe als erledigt erkannt.
+
+### Anbindung im Spiel (Studio-Testmodus, Solo)
+| Schritt | Ergebnis |
+|---|---|
+| Autosave mit 4 Schreibfehlern | `CareerSave=retry` („● SPEICHERN STOCKT – NEUER VERSUCH“) |
+| Nächster Autosave ohne Fehler | `CareerSave=ok` |
+| Kauf Neon-Schuhe (100 → 60 Coins, noch nicht gespeichert), dann Verlassen bei Störung | Abschluss scheitert → Warteschlange (`retryFinal=1`), Speicher noch 100 mit Sperre |
+| Störung vorbei, nächster Autosave-Durchlauf | Abschluss nachgeholt: Speicher 60 Coins + Neon-Schuhe, Sperre frei, Warteschlange leer |
+| Gleicher Ablauf, neue Sitzung im Fehlerzustand | Anzeige der neuen Sitzung bleibt „error“ (nachgeholter Abschluss der alten Sitzung ändert sie nicht) |
+
+Place gespeichert 23:49:34, 291 223 Bytes, SHA256 `556546d7c1bc470a…`; 9/9 Skripte identisch mit `f1c99f7`, Test-Attribute
+nicht in der Place (nur als Text im Career-Quelltext).
+
 ## Nicht geprüft
 - Echter DataStore (Budget, Drosselung, Persistenz über echte Server) – braucht Veröffentlichung in eine Test-Place.
 - Serverwechsel mit zwei echten Servern – nur mit simulierten Servern im Selbsttest und mit nachgestellter Fremdsperre im Spiel.
