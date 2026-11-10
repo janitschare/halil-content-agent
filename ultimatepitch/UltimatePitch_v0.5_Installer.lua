@@ -29,7 +29,14 @@ if #old > 0 then
 end
 local s = Instance.new("Script") s.Name = "UltimatePitchServer" s.Source = [==[-- UltimatePitch v0.5 · Server (baut die Welt beim Start selbst)
 local VERSION = "0.5"
-local GY = 1
+
+-- Gemeinsamer Zustand aller Arenen (M1b): Spielerwerte (Ausdauer, Sprint, Bewegungsprüfung, Cooldown) gelten
+-- serverweit; jedes Match läuft als eigene Instanz in seiner Arena (siehe createArena).
+local G = {
+	arenas = {},
+	chargeStart = {}, sprintWanted = {}, stamina = {}, motion = {}, auroraReady = {},
+	playerLoop = false,
+}
 
 local RS = game:GetService("ReplicatedStorage")
 local Teams = game:GetService("Teams")
@@ -67,9 +74,22 @@ local function part(props, parent)
 	return p
 end
 
-do
+-- Eine Arena = ein eigenständiges Match mit eigenem Ball, eigenen Maßen, eigenem Ursprung und eigenem Zustand.
+-- A = { id, stadium, origin (Vector3), halfLength, halfWidth, goalHalfWidth, slots, matchTime, exitCFrame }
+-- Das Stadion (stadium = true) entsteht zuerst und genau einmal. Es legt auch die gemeinsamen Objekte an (Teams,
+-- RemoteEvents, Sounds, Grundlicht) und steht fest am Welt-Ursprung, weil der SPECTRA DOME dort gebaut ist.
+-- Innerhalb der Logik sind alle Positionen Weltkoordinaten; OX/OZ ist die Feldmitte, CFG.GroundY die Rasenhöhe.
+local function createArena(A)
+assert(type(A.id) == "string" and not G.arenas[A.id], "Arena-Id fehlt oder ist vergeben")
+local O = A.origin or Vector3.zero
+local OX, OZ = O.X, O.Z
+local root, ball, state
+if A.stadium then
+assert(O == Vector3.zero and A.halfLength == 80 and A.halfWidth == 50 and A.goalHalfWidth == 12,
+	"Stadion: fester Ursprung und feste Maße")
+local GY = 1
 ------------------------------------------------------------------ Workspace
-local root = new("Folder", { Name = "UltimatePitch" }, workspace)
+root = new("Folder", { Name = "UltimatePitch" }, workspace)
 root:SetAttribute("Version", VERSION)
 local field = new("Folder", { Name = "Field" }, root)
 local goals = new("Folder", { Name = "Goals" }, root)
@@ -154,7 +174,7 @@ end
 wall(Vector3.new(164, 2, 104), Vector3.new(0, GY + 21, 0)).Transparency = 1
 
 -- Ball
-local ball = part({
+ball = part({
 	Name = "Ball", Shape = Enum.PartType.Ball, Size = Vector3.new(2.2, 2.2, 2.2), Anchored = false,
 	Position = Vector3.new(0, GY + 3, 0), Color = WHITE, Material = Enum.Material.SmoothPlastic,
 	CustomPhysicalProperties = PhysicalProperties.new(0.35, 0.4, 0.5, 1, 1),
@@ -193,7 +213,7 @@ new("Team", { Name = "Blau", TeamColor = BrickColor.new("Really blue"), AutoAssi
 
 ------------------------------------------------------------------ Shared
 local shared = new("Folder", { Name = "UltimatePitch" }, RS)
-local state = new("Folder", { Name = "State" }, shared)
+state = new("Folder", { Name = "State" }, shared)
 for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION,
 	GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false, BallOwner = 0 }) do
 	state:SetAttribute(k, val)
@@ -269,6 +289,78 @@ new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.28, Offset = 0.1, Color 
 new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.4, Size = 24, Threshold = 1.2 }, Lighting)
 new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0, Contrast = 0.08, Saturation = 0.12, TintColor = Color3.new(1, 1, 1) }, Lighting)
 
+else
+	-- Einfache Arena (z. B. Bolzplatz): Boden, Linien, Tore, unsichtbare Banden und Ball – ohne Stadion und Lobby.
+	-- Eigene Objekte liegen unter workspace.UltimatePitch.Arenas.<id> und ReplicatedStorage.UltimatePitch.Arenas.<id>.
+	local GYa = O.Y + 1
+	local HLa, HWa, GWa, GHa = A.halfLength, A.halfWidth, A.goalHalfWidth, 10
+	local function P(x, y, z) return Vector3.new(OX + x, y, OZ + z) end
+	local base = workspace:WaitForChild("UltimatePitch")
+	local arenas = base:FindFirstChild("Arenas") or new("Folder", { Name = "Arenas" }, base)
+	root = new("Folder", { Name = A.id }, arenas)
+	local field = new("Folder", { Name = "Field" }, root)
+	local goals = new("Folder", { Name = "Goals" }, root)
+	local walls = new("Folder", { Name = "Walls" }, root)
+	new("Folder", { Name = "Bots" }, root)
+	local WHITE = Color3.fromRGB(245, 245, 245)
+	part({ Name = "Ground", Size = Vector3.new(HLa * 2 + 16, 1, HWa * 2 + 16), Position = P(0, GYa - 0.5, 0),
+		Material = Enum.Material.Concrete, Color = Color3.fromRGB(70, 74, 82) }, field)
+	part({ Name = "Pitch", Size = Vector3.new(HLa * 2, 0.02, HWa * 2), Position = P(0, GYa + 0.01, 0),
+		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(34, 110, 150), CanCollide = false, CanQuery = false, CanTouch = false }, field)
+	local function line(x1, z1, x2, z2)
+		local a, b = P(x1, GYa + 0.05, z1), P(x2, GYa + 0.05, z2)
+		part({ Name = "Line", Size = Vector3.new(0.5, 0.04, (b - a).Magnitude + 0.5), CFrame = CFrame.lookAt((a + b) / 2, b),
+			Color = WHITE, Material = Enum.Material.SmoothPlastic, CanCollide = false, CanQuery = false, CanTouch = false }, field)
+	end
+	line(-HLa, -HWa, HLa, -HWa); line(-HLa, HWa, HLa, HWa)
+	line(-HLa, -HWa, -HLa, HWa); line(HLa, -HWa, HLa, HWa)
+	line(0, -HWa, 0, HWa)
+	local function wall(size, pos)
+		part({ Name = "Wall", Size = size, Position = pos, Transparency = 1, CastShadow = false }, walls)
+	end
+	wall(Vector3.new(HLa * 2 + 4, 20, 2), P(0, GYa + 10, -(HWa + 1)))
+	wall(Vector3.new(HLa * 2 + 4, 20, 2), P(0, GYa + 10, HWa + 1))
+	wall(Vector3.new(HLa * 2 + 4, 2, HWa * 2 + 4), P(0, GYa + 21, 0))
+	for _, s in ipairs({ -1, 1 }) do
+		local g = new("Model", { Name = s > 0 and "GoalBlau" or "GoalRot" }, goals)
+		local net = { Color = WHITE, Material = Enum.Material.Fabric, Transparency = 0.45 }
+		local function netPart(props)
+			for k, val in pairs(net) do props[k] = props[k] or val end
+			return part(props, g)
+		end
+		netPart({ Name = "Back", Size = Vector3.new(1, GHa + 1, GWa * 2 + 2), Position = P(s * (HLa + 5.5), GYa + (GHa + 1) / 2, 0) })
+		netPart({ Name = "SideL", Size = Vector3.new(5, GHa + 1, 1), Position = P(s * (HLa + 3), GYa + (GHa + 1) / 2, -(GWa + 0.5)) })
+		netPart({ Name = "SideR", Size = Vector3.new(5, GHa + 1, 1), Position = P(s * (HLa + 3), GYa + (GHa + 1) / 2, GWa + 0.5) })
+		netPart({ Name = "Roof", Size = Vector3.new(5, 1, GWa * 2 + 2), Position = P(s * (HLa + 3), GYa + GHa + 0.5, 0) })
+		part({ Name = "PostL", Size = Vector3.new(1, GHa, 1), Position = P(s * (HLa + 0.5), GYa + GHa / 2, -(GWa + 0.5)), Color = WHITE, Material = Enum.Material.Metal }, g)
+		part({ Name = "PostR", Size = Vector3.new(1, GHa, 1), Position = P(s * (HLa + 0.5), GYa + GHa / 2, GWa + 0.5), Color = WHITE, Material = Enum.Material.Metal }, g)
+		part({ Name = "Bar", Size = Vector3.new(1, 1, GWa * 2 + 2), Position = P(s * (HLa + 0.5), GYa + GHa + 0.5, 0), Color = WHITE, Material = Enum.Material.Metal }, g)
+		local seg = HWa - GWa
+		wall(Vector3.new(2, 20, seg), P(s * (HLa + 1), GYa + 10, -(GWa + seg / 2)))
+		wall(Vector3.new(2, 20, seg), P(s * (HLa + 1), GYa + 10, GWa + seg / 2))
+		wall(Vector3.new(2, 20 - GHa, GWa * 2), P(s * (HLa + 1), GYa + GHa + (20 - GHa) / 2, 0))
+	end
+	ball = part({
+		Name = "Ball", Shape = Enum.PartType.Ball, Size = Vector3.new(2.2, 2.2, 2.2), Anchored = false,
+		Position = P(0, GYa + 3, 0), Color = WHITE, Material = Enum.Material.SmoothPlastic,
+		CustomPhysicalProperties = PhysicalProperties.new(0.35, 0.4, 0.5, 1, 1),
+	}, root)
+	local a0 = new("Attachment", { Position = Vector3.new(0, 0.4, 0) }, ball)
+	local a1 = new("Attachment", { Position = Vector3.new(0, -0.4, 0) }, ball)
+	new("Trail", { Attachment0 = a0, Attachment1 = a1, Lifetime = 0.25, Transparency = NumberSequence.new(0.4, 1) }, ball)
+	new("Sound", { Name = "Kick", SoundId = "rbxassetid://9119330229", Volume = 1, RollOffMaxDistance = 220 }, ball)
+	local sharedBase = RS:WaitForChild("UltimatePitch")
+	local sharedArenas = sharedBase:FindFirstChild("Arenas") or new("Folder", { Name = "Arenas" }, sharedBase)
+	state = new("Folder", { Name = "State" }, new("Folder", { Name = A.id }, sharedArenas))
+	for k, val in pairs({ Phase = "Lobby", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", MessageId = 0, Version = VERSION,
+		GoalSeq = 0, LastGoalTeam = "", LastGoalAurora = false, BallOwner = 0 }) do
+		state:SetAttribute(k, val)
+	end
+	new("ObjectValue", { Name = "BallCarrier" }, state)
+end
+G.arenas[A.id] = true
+for k, val in pairs({ ArenaId = A.id, Origin = O, HalfLength = A.halfLength, HalfWidth = A.halfWidth, GoalHalfWidth = A.goalHalfWidth }) do
+	state:SetAttribute(k, val)
 end
 
 -- ===== Spiellogik =====
@@ -277,24 +369,32 @@ local Teams = game:GetService("Teams")
 local RS = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local ROOT = workspace:WaitForChild("UltimatePitch")
 local SHARED = RS:WaitForChild("UltimatePitch")
-local State = SHARED:WaitForChild("State")
+local State = state
 local KickEvent = SHARED:WaitForChild("Kick")
-local Ball = ROOT:WaitForChild("Ball")
-local BotsFolder = ROOT:WaitForChild("Bots")
-local LobbySpawn = ROOT:WaitForChild("Lobby"):WaitForChild("LobbySpawn")
+local Ball = ball
+local BotsFolder = root:WaitForChild("Bots")
+-- Wohin Teilnehmer nach dem Match bzw. bei Abmeldung kommen: Stadion-Lobby oder ein Punkt neben der Arena
+local EXIT_CF = A.exitCFrame
+if not EXIT_CF then
+	if A.stadium then
+		EXIT_CF = root:WaitForChild("Lobby"):WaitForChild("LobbySpawn").CFrame + Vector3.new(0, 4, 0)
+	else
+		EXIT_CF = CFrame.new(OX, O.Y + 5, OZ - A.halfWidth - 5) -- auf dem Bodenrand neben dem Feld (Boden reicht 8 Studs über die Linie)
+	end
+end
 local LobbyTeam = Teams:WaitForChild("Lobby")
 local Sounds = SHARED:WaitForChild("Sounds")
 local function sfx(name)
+	if not A.stadium then return end -- diese Sounds sind nicht räumlich: nur das Stadion spielt sie
 	local snd = Sounds:FindFirstChild(name)
 	if snd then snd:Play() end
 end
 
 local CFG = {
-	MatchTime = 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
+	MatchTime = A.matchTime or 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
 	AutoQueue = true, -- jeden Spieler beim Beitritt fürs Match anmelden (false, sobald die Stadt einen eigenen Einstieg hat)
-	HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12, GoalHeight = 10, GroundY = 1,
+	HalfLength = A.halfLength, HalfWidth = A.halfWidth, GoalHalfWidth = A.goalHalfWidth, GoalHeight = 10, GroundY = O.Y + 1,
 	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
 	-- Server-Autorität (eigene Testwerte): Schussladung wird serverseitig gemessen, Ausdauer serverseitig geführt
@@ -319,7 +419,7 @@ local TEAM = {
 		color = Color3.fromRGB(40, 90, 230), keeper = Color3.fromRGB(30, 200, 170) },
 }
 -- Slot 1 = Torwart, 2-5 Feldspieler (d = Abstand vom eigenen Tor)
-local SLOTS = { { d = 4, z = 0 }, { d = 28, z = -18 }, { d = 28, z = 18 }, { d = 62, z = -14 }, { d = 62, z = 14 } }
+local SLOTS = A.slots or { { d = 4, z = 0 }, { d = 28, z = -18 }, { d = 28, z = 18 }, { d = 62, z = -14 }, { d = 62, z = 14 } }
 
 local phase = "Lobby"
 local roster = { Rot = {}, Blau = {} }
@@ -328,7 +428,7 @@ local pendingGoal = nil
 local pendingGoalAurora = false
 local botCd, lastKick = {}, {}
 -- Serverseitiger Spielerzustand: Schussladung, Sprint-Wunsch, Ausdauer, Bewegungs-Stichprobe, Skill-Cooldown
-local chargeStart, sprintWanted, stamina, motion, auroraReady = {}, {}, {}, {}, {}
+local chargeStart, sprintWanted, stamina, motion, auroraReady = G.chargeStart, G.sprintWanted, G.stamina, G.motion, G.auroraReady
 local auroraHold = nil      -- { player, releaseAt } während des Anlaufs: Ball wird vor dem Spieler gehalten
 -- Schuss-Token des letzten AURORA-Kicks: { id, player, team, expires }. Jede andere Ballaktion
 -- (Pass, Schuss, Bot-Kick, Parade, Ball-Reset, Berührung durch eine andere Figur) löscht es.
@@ -359,10 +459,11 @@ local function msg(t)
 end
 local function inMatch() return phase == "Playing" or phase == "GoldenGoal" end
 
--- Teilnahme (M1): Das Match erfasst nur angemeldete Spieler (Player-Attribut UP_InMatchQueue, ausschließlich
--- serverseitig gesetzt). Wer nicht angemeldet ist, wird weder eingeteilt noch teleportiert. Solange es
--- außer dem Stadion nichts gibt, meldet AutoQueue jeden Spieler beim Beitritt automatisch an.
-local function queued(plr) return plr:GetAttribute("UP_InMatchQueue") == true end
+-- Teilnahme (M1): Ein Match erfasst nur Spieler, die für seine Arena angemeldet sind (Player-Attribut
+-- UP_Arena = Arena-Id, ausschließlich serverseitig gesetzt; leer = nirgends angemeldet). Wer nicht angemeldet
+-- ist, wird weder eingeteilt noch teleportiert. Solange es außer dem Stadion nichts gibt, meldet AutoQueue
+-- jeden Spieler beim Beitritt automatisch im Stadion an.
+local function queued(plr) return plr:GetAttribute("UP_Arena") == A.id end
 local function queuedPlayers()
 	local list = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -373,7 +474,7 @@ end
 
 local function slotPos(td, slot)
 	local s = SLOTS[slot]
-	return Vector3.new(-td.sign * CFG.HalfLength + td.sign * s.d, CFG.GroundY + 3, s.z)
+	return Vector3.new(OX - td.sign * CFG.HalfLength + td.sign * s.d, CFG.GroundY + 3, OZ + s.z)
 end
 local function slotCF(td, slot)
 	local p = slotPos(td, slot)
@@ -385,7 +486,7 @@ local function resetBall()
 	auroraShot = nil
 	Ball.AssemblyLinearVelocity = Vector3.zero
 	Ball.AssemblyAngularVelocity = Vector3.zero
-	Ball.CFrame = CFrame.new(0, CFG.GroundY + 3, 0)
+	Ball.CFrame = CFrame.new(OX, CFG.GroundY + 3, OZ)
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 end
 -- kicker (optional): Figur, die den Ball spielt. Clients zeigen dazu nur eine Schussanimation ("KickAnim");
@@ -684,7 +785,8 @@ end
 
 ---------------------------------------------------------------- KI
 local function clampField(p)
-	return Vector3.new(math.clamp(p.X, -78, 78), CFG.GroundY, math.clamp(p.Z, -48, 48))
+	local hl, hw = CFG.HalfLength - 2, CFG.HalfWidth - 2
+	return Vector3.new(OX + math.clamp(p.X - OX, -hl, hl), CFG.GroundY, OZ + math.clamp(p.Z - OZ, -hw, hw))
 end
 
 -- KI v2: Bots führen den Ball mit derselben Ballführung wie Menschen (dribble) und entscheiden am Ball
@@ -752,10 +854,10 @@ local function shoot(td, m, opps)
 	local bp = Ball.Position
 	local kz = 0
 	for _, o in ipairs(opps) do
-		if o.slot == 1 then kz = o.root.Position.Z end
+		if o.slot == 1 then kz = o.root.Position.Z - OZ end
 	end
 	local side = kz > 0 and -1 or 1
-	local aim = Vector3.new(s * (CFG.HalfLength + 4), 0, side * (CFG.GoalHalfWidth - 2.5) + (math.random() - 0.5) * 3)
+	local aim = Vector3.new(OX + s * (CFG.HalfLength + 4), 0, OZ + side * (CFG.GoalHalfWidth - 2.5) + (math.random() - 0.5) * 3)
 	local dir = unit(flat(aim - bp), Vector3.new(s, 0, 0))
 	kickBall(dir * CFG.ShotPower * (0.85 + math.random() * 0.2) + Vector3.new(0, 3 + math.random() * 8, 0), m.model)
 end
@@ -776,13 +878,13 @@ local function carryBall(td, m, list, opps)
 	local s = td.sign
 	local root = m.root
 	local bp = Ball.Position
-	local toGoal = flat(Vector3.new(s * CFG.HalfLength, 0, 0) - bp)
+	local toGoal = flat(Vector3.new(OX + s * CFG.HalfLength, 0, OZ) - bp)
 	local _, press = nearestOpp(bp, opps)
 	local now = os.clock()
 	if (botCd[m.model] or 0) <= now then
 		botCd[m.model] = now + CFG.BotDecision
 		local goalDist = toGoal.Magnitude
-		if goalDist < 24 or (goalDist < CFG.BotShootRange and math.abs(bp.Z) < 30 and press > 4) then
+		if goalDist < 24 or (goalDist < CFG.BotShootRange and math.abs(bp.Z - OZ) < 30 and press > 4) then
 			shoot(td, m, opps)
 			return
 		end
@@ -816,8 +918,12 @@ end
 
 local function keeper(td, m, bp, list, opps)
 	local s = td.sign
+	-- Rechnung in Arena-Koordinaten (Feldmitte = 0), das Laufziel geht danach zurück in Weltkoordinaten
+	local wbp = bp
+	bp = Vector3.new(bp.X - OX, bp.Y, bp.Z - OZ)
 	local gx = -s * CFG.HalfLength
-	local inBox = math.abs(bp.X - gx) < 20 and math.abs(bp.Z) < 22
+	local boxX, boxZ = math.min(20, CFG.HalfLength * 0.35), math.min(22, CFG.HalfWidth - 2)
+	local inBox = math.abs(bp.X - gx) < boxX and math.abs(bp.Z) < boxZ
 	local target
 	if inBox then
 		-- torseitig hinter den Ball stellen (statt auf den Ball zu laufen und ihn ins eigene Tor zu schieben)
@@ -826,11 +932,11 @@ local function keeper(td, m, bp, list, opps)
 	else
 		target = Vector3.new(gx + s * 3, 0, math.clamp(bp.Z * 0.35, -CFG.GoalHalfWidth + 2, CFG.GoalHalfWidth - 2))
 	end
-	local minX, maxX = math.min(gx + s * 1.5, gx + s * 20), math.max(gx + s * 1.5, gx + s * 20)
-	target = Vector3.new(math.clamp(target.X, minX, maxX), CFG.GroundY, math.clamp(target.Z, -22, 22))
+	local minX, maxX = math.min(gx + s * 1.5, gx + s * boxX), math.max(gx + s * 1.5, gx + s * boxX)
+	target = Vector3.new(OX + math.clamp(target.X, minX, maxX), CFG.GroundY, OZ + math.clamp(target.Z, -boxZ, boxZ))
 	m.hum:MoveTo(target)
 
-	local rel = bp - m.root.Position
+	local rel = wbp - m.root.Position
 	local now = os.clock()
 	-- nicht eingreifen, wenn ein eigener Mitspieler den Ball führt
 	if flat(rel).Magnitude < 6.5 and rel.Y < 7 and (botCd[m.model] or 0) < now and carrierTeam() ~= td.name then
@@ -860,7 +966,7 @@ local function thinkTeam(teamName)
 	local cTeam = carrierTeam()
 	local weHave = cTeam == teamName
 	local theyHave = cTeam ~= nil and not weHave
-	local ownGoal = Vector3.new(-s * CFG.HalfLength, 0, 0)
+	local ownGoal = Vector3.new(OX - s * CFG.HalfLength, 0, OZ)
 	-- Ohne eigenen Ballbesitz: nächster Feldspieler presst, zweitnächster sichert zwischen Ball und Tor ab
 	local order = {}
 	if not weHave then
@@ -880,7 +986,7 @@ local function thinkTeam(teamName)
 				carryBall(td, m, list, opps)
 			else
 				local home = slotPos(td, m.slot)
-				local defender = m.slot <= 3
+				local defender = m.slot <= math.ceil((#SLOTS + 1) / 2) -- 5 Plätze: 2-3 hinten; 3 Plätze: 2 hinten
 				local target
 				if m == presser then
 					target = bp - Vector3.new(s, 0, 0) * 1.2
@@ -889,14 +995,14 @@ local function thinkTeam(teamName)
 				elseif weHave then
 					-- Freilaufen: Verteidiger hinter dem Ball, Stürmer vor dem Ball und in die Breite
 					if defender then
-						target = Vector3.new(bp.X - s * 16, 0, home.Z * 1.2)
+						target = Vector3.new(bp.X - s * 16, 0, OZ + (home.Z - OZ) * 1.2)
 					else
-						target = Vector3.new(bp.X + s * 20, 0, home.Z * 2.2)
+						target = Vector3.new(bp.X + s * 20, 0, OZ + (home.Z - OZ) * 2.2)
 					end
 				else
 					-- Formation: zwischen Grundposition und Ball, Verteidiger tiefer
 					local pull = defender and 0.35 or 0.55
-					target = Vector3.new(home.X + (bp.X - home.X) * pull, 0, home.Z * 0.9 + bp.Z * 0.3)
+					target = Vector3.new(home.X + (bp.X - home.X) * pull, 0, OZ + (home.Z - OZ) * 0.9 + (bp.Z - OZ) * 0.3)
 				end
 				m.hum:MoveTo(clampField(target))
 				-- Zweikampf gegen den gegnerischen Ballführer (Mensch oder Bot): nur aus kurzer Distanz,
@@ -945,7 +1051,7 @@ local function setupTeams()
 		list[i], list[j] = list[j], list[i]
 	end
 	for idx, plr in ipairs(list) do
-		if idx <= 8 then
+		if idx <= (#SLOTS - 1) * 2 then
 			local teamName = (idx % 2 == 1) and "Rot" or "Blau"
 			local slot = 2 + math.floor((idx - 1) / 2)
 			plr.Team = TEAM[teamName].team
@@ -965,15 +1071,20 @@ end
 
 local function cleanup()
 	clearBots()
+	-- nur die Teilnehmer dieser Arena zurückholen; alle anderen Spieler bleiben, wo sie sind
+	local participants = {}
+	for _, slots in pairs(roster) do
+		for _, e in pairs(slots) do
+			if e.kind == "player" and e.player.Parent then table.insert(participants, e.player) end
+		end
+	end
 	roster = { Rot = {}, Blau = {} }
-	for _, plr in ipairs(Players:GetPlayers()) do
-		-- nur Matchteilnehmer zurück in die Lobby; alle anderen Spieler bleiben, wo sie sind
-		if not TEAM[plr.Team and plr.Team.Name] then continue end
+	for _, plr in ipairs(participants) do
 		plr.Team = LobbyTeam
 		local char = plr.Character
 		if char then
 			highlight(char, nil)
-			teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
+			teleport(plr, EXIT_CF)
 			local hum = char:FindFirstChildOfClass("Humanoid")
 			if hum then hum.WalkSpeed = 16 end
 			char:SetAttribute("BaseSpeed", 16)
@@ -1077,7 +1188,7 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, arg)
 	if not inMatch() or pendingGoal or auroraHold then return end
 	local teamName = plr.Team and plr.Team.Name
 	local td = TEAM[teamName]
-	if not td then return end
+	if not td or not findPlayerSlot(plr) then return end -- nur Teilnehmer dieser Arena
 	local char = plr.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if not root then return end
@@ -1174,38 +1285,59 @@ local function onCharacter(plr)
 		placePlayer(plr, teamName, slot)
 	elseif plr.Character then
 		-- nur angemeldete Spieler in die Stadion-Lobby holen; alle anderen spawnen, wo die Welt sie hinstellt
-		if queued(plr) then teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0)) end
-		plr.Character:SetAttribute("BaseSpeed", 16)
+		if queued(plr) then
+			teleport(plr, EXIT_CF)
+			plr.Character:SetAttribute("BaseSpeed", 16)
+		end
 	end
 end
 
--- Abmeldung während eines Matches: Platz geht an einen Bot, der Spieler kehrt in die Lobby zurück
+-- Abmeldung: Der Spieler verlässt den Kader sofort (noch vor jedem Warten), sein Platz geht im laufenden Match an
+-- einen Bot. An den Ausgang dieser Arena kommt er nur, wenn er nirgends mehr angemeldet ist – wechselt er in eine
+-- andere Arena, stellt ihn deren Anmeldung hin (sie läuft verzögert, also immer nach dieser Abmeldung).
 local function leaveMatch(plr)
 	local teamName, slot = findPlayerSlot(plr)
 	if not teamName then return end
 	if auroraHold and auroraHold.player == plr then auroraHold = nil end
-	roster[teamName][slot] = { kind = "bot", model = makeBot(TEAM[teamName], slot) }
+	roster[teamName][slot] = nil
 	plr.Team = LobbyTeam
 	local char = plr.Character
 	if char then
 		highlight(char, nil)
-		teleport(plr, LobbySpawn.CFrame + Vector3.new(0, 4, 0))
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then hum.WalkSpeed = 16 end
 		char:SetAttribute("BaseSpeed", 16)
+		if (plr:GetAttribute("UP_Arena") or "") == "" then teleport(plr, EXIT_CF) end
+	end
+	if phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" and not roster[teamName][slot] then
+		local bot = makeBot(TEAM[teamName], slot) -- kann kurz warten (Avatar laden)
+		if not roster[teamName][slot] and phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
+			roster[teamName][slot] = { kind = "bot", model = bot }
+		else
+			bot:Destroy()
+		end
 	end
 end
 
 local function onPlayer(plr)
-	if plr:GetAttribute("UP_InMatchQueue") == nil then plr:SetAttribute("UP_InMatchQueue", CFG.AutoQueue) end
-	plr:GetAttributeChangedSignal("UP_InMatchQueue"):Connect(function()
+	if A.stadium and plr:GetAttribute("UP_Arena") == nil then
+		plr:SetAttribute("UP_Arena", CFG.AutoQueue and A.id or "")
+	end
+	plr:GetAttributeChangedSignal("UP_Arena"):Connect(function()
 		if queued(plr) then
-			-- Anmeldung während eines laufenden Matches: wie ein Spät-Beitritt
-			if (inMatch() or phase == "Goal") and not findPlayerSlot(plr) and plr.Character then
-				local teamName, slot = joinRunningMatch(plr)
-				if teamName then placePlayer(plr, teamName, slot) end
-			end
-		elseif phase ~= "Lobby" and phase ~= "Intermission" and phase ~= "End" then
+			-- Verzögert, damit die Abmeldung in der bisherigen Arena sicher zuerst abgeschlossen ist
+			task.defer(function()
+				if not queued(plr) or findPlayerSlot(plr) or not plr.Character then return end
+				if inMatch() or phase == "Goal" then
+					-- Anmeldung während eines laufenden Matches: wie ein Spät-Beitritt
+					local teamName, slot = joinRunningMatch(plr)
+					if teamName then placePlayer(plr, teamName, slot) return end
+				end
+				-- sonst an den Wartepunkt dieser Arena
+				teleport(plr, EXIT_CF)
+				plr.Character:SetAttribute("BaseSpeed", 16)
+			end)
+		else
 			leaveMatch(plr)
 		end
 	end)
@@ -1275,7 +1407,7 @@ local function dribble()
 	end
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local char = plr.Character
-		if TEAM[plr.Team and plr.Team.Name] and char then
+		if char and findPlayerSlot(plr) then -- nur Teilnehmer dieser Arena
 			consider(char, char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid"), plr, -0.3)
 		end
 	end
@@ -1329,10 +1461,11 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 	if not pendingGoal and not auroraHold then dribble() end
 	local p = Ball.Position
+	local lx, lz = p.X - OX, p.Z - OZ -- Ball in Arena-Koordinaten
 	-- Tor?
-	if not pendingGoal and math.abs(p.Z) < CFG.GoalHalfWidth and p.Y < CFG.GroundY + CFG.GoalHeight then
-		if p.X > CFG.HalfLength + 1.2 then pendingGoal = "Rot"
-		elseif p.X < -CFG.HalfLength - 1.2 then pendingGoal = "Blau" end
+	if not pendingGoal and math.abs(lz) < CFG.GoalHalfWidth and p.Y < CFG.GroundY + CFG.GoalHeight then
+		if lx > CFG.HalfLength + 1.2 then pendingGoal = "Rot"
+		elseif lx < -CFG.HalfLength - 1.2 then pendingGoal = "Blau" end
 		if pendingGoal then
 			local shot = auroraShot
 			pendingGoalAurora = shot ~= nil and os.clock() < shot.expires and shot.team == pendingGoal
@@ -1340,7 +1473,7 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 	-- Ball verloren?
-	if p.Y < -20 or math.abs(p.X) > 100 or math.abs(p.Z) > 70 then resetBall() end
+	if p.Y < CFG.GroundY - 21 or math.abs(lx) > CFG.HalfLength + 20 or math.abs(lz) > CFG.HalfWidth + 20 then resetBall() end
 	-- Rollwiderstand
 	if p.Y < CFG.GroundY + 1.5 then
 		local vel = Ball.AssemblyLinearVelocity
@@ -1357,7 +1490,10 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 end)
 
--- Ausdauer, Sprint und Bewegungsplausibilität serverseitig (läuft auch außerhalb des Matches)
+-- Ausdauer, Sprint und Bewegungsplausibilität serverseitig (läuft auch außerhalb des Matches).
+-- Gilt für alle Spieler auf dem Server und läuft deshalb nur einmal, nicht je Arena.
+if not G.playerLoop then
+G.playerLoop = true
 RunService.Heartbeat:Connect(function(dt)
 	local now = os.clock()
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -1403,6 +1539,7 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 end)
+end
 
 ---------------------------------------------------------------- Hauptschleife
 -- Die Spielschleife läuft in eigenem Thread mit Generationszähler. Ein Watchdog startet sie neu, wenn sie
@@ -1450,6 +1587,31 @@ task.spawn(function()
 		end
 	end
 end)
+end -- createArena
+
+createArena({ id = "Stadium", stadium = true, origin = Vector3.zero, halfLength = 80, halfWidth = 50, goalHalfWidth = 12 })
+
+-- Weitere Arenen (z. B. der Bolzplatz in M2) entstehen über diese Schnittstelle. Sie liegt unter dem Server-Skript
+-- in ServerScriptService und ist damit für Clients nicht erreichbar.
+local createFn = Instance.new("BindableFunction")
+createFn.Name = "CreateArena"
+createFn.OnInvoke = function(cfg)
+	assert(type(cfg) == "table" and cfg.stadium ~= true, "ungültige Arena-Konfiguration")
+	assert(type(cfg.id) == "string" and #cfg.id > 0 and #cfg.id <= 32 and not cfg.id:find("[^%w_]"), "ungültige Arena-Id")
+	assert(typeof(cfg.origin) == "Vector3", "origin fehlt")
+	for _, key in ipairs({ "halfLength", "halfWidth", "goalHalfWidth" }) do
+		assert(type(cfg[key]) == "number" and cfg[key] == cfg[key] and cfg[key] > 0 and cfg[key] <= 200, key .. " ungültig")
+	end
+	assert(cfg.goalHalfWidth < cfg.halfWidth, "Tor breiter als das Feld")
+	assert(cfg.halfLength >= 15 and cfg.halfWidth >= 10, "Feld zu klein")
+	assert(type(cfg.slots) == "table" and #cfg.slots >= 2 and #cfg.slots <= 5, "slots: 2 bis 5 Plätze je Team")
+	for _, sl in ipairs(cfg.slots) do
+		assert(type(sl) == "table" and type(sl.d) == "number" and type(sl.z) == "number", "slot ungültig")
+	end
+	createArena(cfg)
+	return true
+end
+createFn.Parent = script
 ]==]
 local sd = Instance.new("ModuleScript") sd.Name = "Dome" sd.Source = [==[-- UltimatePitch · SPECTRA DOME (ModuleScript unter UltimatePitchServer)
 -- Eigener prozeduraler Stadionbau aus Roblox-Grundteilen: elliptischer Zwei-Rang-Kessel mit Umlauf und
