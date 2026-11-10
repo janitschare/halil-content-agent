@@ -15,6 +15,7 @@ function Src([string]$name) {
 $server = Src "Server.server.lua"
 $client = Src "Client.client.lua"
 $dome = Src "Dome.lua"
+$city = Src "City.lua"
 $aurora = Src "AuroraFX.lua"
 $matchday = Src "Matchday.lua"
 
@@ -31,7 +32,7 @@ $rbxlx = "<roblox version=`"4`">`n" +
     "<Item class=`"Lighting`" referent=`"RBX8`"><Properties><string name=`"Name`">Lighting</string>" +
     "<token name=`"LightingStyle`">0</token><bool name=`"PrioritizeLightingQuality`">false</bool></Properties></Item>`n" +
     "<Item class=`"ServerScriptService`" referent=`"RBX1`"><Properties><string name=`"Name`">ServerScriptService</string></Properties>`n" +
-    (Item "Script" "RBX2" "UltimatePitchServer" $server (Item "ModuleScript" "RBX6" "Dome" $dome "")) + "`n" +
+    (Item "Script" "RBX2" "UltimatePitchServer" $server ((Item "ModuleScript" "RBX6" "Dome" $dome "") + (Item "ModuleScript" "RBX10" "City" $city ""))) + "`n" +
     "</Item>`n" +
     "<Item class=`"StarterPlayer`" referent=`"RBX3`"><Properties><string name=`"Name`">StarterPlayer</string></Properties>`n" +
     "<Item class=`"StarterPlayerScripts`" referent=`"RBX4`"><Properties><string name=`"Name`">StarterPlayerScripts</string></Properties>`n" +
@@ -71,6 +72,7 @@ $installer = "-- UltimatePitch v$V – Command-Bar-Installer (Alternative zur .r
     "end`n" +
     "local s = Instance.new(`"Script`") s.Name = `"UltimatePitchServer`" s.Source = [==[$server]==]`n" +
     "local sd = Instance.new(`"ModuleScript`") sd.Name = `"Dome`" sd.Source = [==[$dome]==] sd.Parent = s`n" +
+    "local sc = Instance.new(`"ModuleScript`") sc.Name = `"City`" sc.Source = [==[$city]==] sc.Parent = s`n" +
     "local c = Instance.new(`"LocalScript`") c.Name = `"UltimatePitchClient`" c.Source = [==[$client]==]`n" +
     "local ca = Instance.new(`"ModuleScript`") ca.Name = `"AuroraFX`" ca.Source = [==[$aurora]==] ca.Parent = c`n" +
     "local cm = Instance.new(`"ModuleScript`") cm.Name = `"Matchday`" cm.Source = [==[$matchday]==] cm.Parent = c`n" +

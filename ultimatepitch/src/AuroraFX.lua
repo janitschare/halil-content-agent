@@ -474,7 +474,7 @@ function AuroraFX.aura(root, own, duration)
 end
 
 -- Anlauf: Animation + gestaffelte Ringe + Aura; volle Effektmenge nur für den eigenen Schützen (FX-Budget)
-function AuroraFX.windup(userId, windup)
+function AuroraFX.windup(userId, windup, ball)
 	local char, plr = charOf(userId)
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if not root then return end
@@ -493,7 +493,7 @@ function AuroraFX.windup(userId, windup)
 		m.marker = name
 		-- Messwert für Tests (lokal, nicht repliziert): Abstand Anlaufbeginn -> Kick-Marker
 		if own then Players.LocalPlayer:SetAttribute("AuroraMarkerDelay", m.markerAt - m.windupAt) end
-	end, workspace:FindFirstChild("UltimatePitch") and workspace.UltimatePitch:FindFirstChild("Ball"))
+	end, ball)
 end
 
 -- Server hat am Kick-Marker geschossen: Ball-Kern, Spur, Streifen, Bodenimpuls, Kamera

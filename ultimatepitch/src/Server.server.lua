@@ -154,7 +154,8 @@ local a0 = new("Attachment", { Position = Vector3.new(0, 0.4, 0) }, ball)
 local a1 = new("Attachment", { Position = Vector3.new(0, -0.4, 0) }, ball)
 new("Trail", { Attachment0 = a0, Attachment1 = a1, Lifetime = 0.25, Transparency = NumberSequence.new(0.4, 1) }, ball)
 
--- Lobby (schwebt über der Seitenlinie, Blick aufs Feld)
+-- Lobby (schwebt über der Seitenlinie, Blick aufs Feld) – entfällt, sobald die Stadt den Einstieg übernimmt
+if A.lobby ~= false then
 local LC = Vector3.new(0, 70, -240) -- hinter der Außenwand des SPECTRA DOME: vom Spielfeld aus nicht sichtbar
 part({ Name = "Floor", Size = Vector3.new(50, 2, 40), Position = LC, Material = Enum.Material.Slate, Color = Color3.fromRGB(40, 44, 52) }, lobby)
 for _, w in ipairs({
@@ -176,6 +177,7 @@ new("TextLabel", {
 	Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "ULTIMATEPITCH v" .. VERSION,
 	Font = Enum.Font.GothamBlack, TextScaled = true, TextColor3 = Color3.fromRGB(255, 200, 40),
 }, sg)
+end
 
 ------------------------------------------------------------------ Teams
 new("Team", { Name = "Lobby", TeamColor = BrickColor.new("White"), AutoAssignable = true }, Teams)
@@ -364,7 +366,7 @@ end
 
 local CFG = {
 	MatchTime = A.matchTime or 180, Intermission = 12, GoalPause = 3, EndPause = 6, MinPlayers = 1,
-	AutoQueue = true, -- jeden Spieler beim Beitritt fürs Match anmelden (false, sobald die Stadt einen eigenen Einstieg hat)
+	AutoQueue = false, -- Beitritt über die Pads der Stadt; true meldete jeden Spieler beim Betreten des Servers im Stadion an
 	HalfLength = A.halfLength, HalfWidth = A.halfWidth, GoalHalfWidth = A.goalHalfWidth, GoalHeight = 10, GroundY = O.Y + 1,
 	KickRange = 5, ShotRange = 7.5, ShotPower = 95, ShotMin = 45, ShotMax = 115, SprintFactor = 1.45, PassPower = 60, PlayerSpeed = 18, BotSpeed = 17, KeeperSpeed = 19,
 	BallDrag = 0.55,
@@ -473,7 +475,7 @@ local function kickBall(vel, kicker)
 	end
 	pcall(function() Ball:SetNetworkOwner(nil) end)
 	Ball.AssemblyLinearVelocity = vel
-	if kicker then EffectEvent:FireAllClients("KickAnim", 0, kicker) end
+	if kicker then EffectEvent:FireAllClients("KickAnim", 0, kicker, A.id) end
 end
 -- Berührt eine andere Figur (Spieler oder Bot) den Ball, gehört ein späteres Tor nicht mehr zum AURORA-Schuss
 Ball.Touched:Connect(function(part)
@@ -1072,6 +1074,8 @@ local function cleanup()
 	end
 	roster = { Rot = {}, Blau = {} }
 	for _, plr in ipairs(participants) do
+		-- nach dem Match ist der Spieler wieder frei in der Stadt (neuer Beitritt über das Pad)
+		if plr:GetAttribute("UP_Arena") == A.id then plr:SetAttribute("UP_Arena", "") end
 		plr.Team = LobbyTeam
 		local char = plr.Character
 		if char then
@@ -1216,7 +1220,7 @@ KickEvent.OnServerEvent:Connect(function(plr, kind, arg)
 		auroraReady[plr] = now + CFG.AuroraCooldown
 		plr:SetAttribute("AuroraReady", workspace:GetServerTimeNow() + CFG.AuroraCooldown)
 		auroraHold = { player = plr, releaseAt = now + CFG.AuroraWindup }
-		EffectEvent:FireAllClients("AuroraWindup", plr.UserId, CFG.AuroraWindup)
+		EffectEvent:FireAllClients("AuroraWindup", plr.UserId, CFG.AuroraWindup, A.id)
 	end
 end)
 
@@ -1229,7 +1233,7 @@ local function releaseAurora()
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if not root or not hum or hum.Health <= 0 or not inMatch() then
-		EffectEvent:FireAllClients("AuroraCancel", plr.UserId)
+		EffectEvent:FireAllClients("AuroraCancel", plr.UserId, nil, A.id)
 		return
 	end
 	local td = TEAM[plr.Team and plr.Team.Name]
@@ -1239,7 +1243,7 @@ local function releaseAurora()
 	auroraShot = { id = auroraShotSeq, player = plr, team = plr.Team and plr.Team.Name,
 		expires = os.clock() + CFG.AuroraGoalWindow }
 	State:SetAttribute("AuroraShotId", auroraShotSeq)
-	EffectEvent:FireAllClients("AuroraKick", plr.UserId)
+	EffectEvent:FireAllClients("AuroraKick", plr.UserId, nil, A.id)
 end
 
 local function humansIn(teamName)
@@ -1581,7 +1585,44 @@ task.spawn(function()
 end)
 end -- createArena
 
-createArena({ id = "Stadium", stadium = true, origin = Vector3.zero, halfLength = 80, halfWidth = 50, goalHalfWidth = 12 })
+-- ULTIMATE CITY, erster Bezirk (M2): Plaza mit Spawn vor der Südseite des SPECTRA DOME, Stadionzugang und Bolzplatz.
+-- Spieler starten frei auf der Plaza und melden sich über ein Pad für eine Arena an.
+local PlayersService = game:GetService("Players")
+local LAYOUT = {
+	groundY = 1,
+	plaza = Vector3.new(0, 0, -215),
+	stadiumPad = Vector3.new(0, 1.2, -158),
+	courtPad = Vector3.new(86, 1.2, -235),
+	court = { origin = Vector3.new(130, 0, -235), halfLength = 30, halfWidth = 18 },
+}
+createArena({ id = "Stadium", stadium = true, lobby = false, origin = Vector3.zero, halfLength = 80, halfWidth = 50, goalHalfWidth = 12,
+	exitCFrame = CFrame.lookAt(Vector3.new(16, 5, -174), Vector3.new(0, 5, -158)) })
+createArena({ id = "StreetCourt", origin = LAYOUT.court.origin, halfLength = LAYOUT.court.halfLength, halfWidth = LAYOUT.court.halfWidth,
+	goalHalfWidth = 6, matchTime = 120, slots = { { d = 3, z = 0 }, { d = 12, z = -7 }, { d = 22, z = 7 } },
+	exitCFrame = CFrame.lookAt(Vector3.new(78, 5, -222), Vector3.new(86, 5, -235)) })
+local city = require(script:WaitForChild("City")).build(workspace:WaitForChild("UltimatePitch"), LAYOUT)
+
+-- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Die Berührung
+-- wertet der Server aus; der Client kann sich nicht selbst anmelden.
+local padTouch = {}
+for arenaId, pad in pairs(city.pads) do
+	pad.Touched:Connect(function(hit)
+		local char = hit.Parent
+		local plr = char and PlayersService:GetPlayerFromCharacter(char)
+		local hum = plr and char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then return end
+		local now = os.clock()
+		if (padTouch[plr] or 0) + 1.5 > now then return end
+		padTouch[plr] = now
+		if (plr:GetAttribute("UP_Arena") or "") == "" then plr:SetAttribute("UP_Arena", arenaId) end
+	end)
+end
+PlayersService.PlayerRemoving:Connect(function(plr) padTouch[plr] = nil end)
+
+-- Verlassen: Der Client darf nur seine eigene Anmeldung zurücknehmen (zurück in die Stadt), sonst nichts.
+RS:WaitForChild("UltimatePitch"):WaitForChild("Kick").OnServerEvent:Connect(function(plr, kind)
+	if kind == "Leave" and (plr:GetAttribute("UP_Arena") or "") ~= "" then plr:SetAttribute("UP_Arena", "") end
+end)
 
 -- Weitere Arenen (z. B. der Bolzplatz in M2) entstehen über diese Schnittstelle. Sie liegt unter dem Server-Skript
 -- in ServerScriptService und ist damit für Clients nicht erreichbar.

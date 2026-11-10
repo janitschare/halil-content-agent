@@ -18,7 +18,8 @@ local HALF_LENGTH = 80
 local INTRO_TIME = 3 -- Sekunden; läuft im Countdown der Vorbereitung (TimeLeft 3 → Anpfiff)
 local CELEBRATE_TIME = 2.4
 
-local opts = { reducedMotion = function() return false end, fxScale = function() return 1 end, profile = function() return "Hoch" end }
+local opts = { reducedMotion = function() return false end, fxScale = function() return 1 end, profile = function() return "Hoch" end,
+	isStadium = function() return true end }
 
 local fxFolder = Instance.new("Folder")
 fxFolder.Name = "UP_MatchdayFX"
@@ -70,7 +71,7 @@ local function titleCard(gui)
 	sub.Font = Enum.Font.GothamBold
 	sub.TextSize = 16
 	sub.TextColor3 = Color3.fromRGB(40, 210, 255)
-	sub.Text = "ANPFIFF  ·  SPECTRA DOME"
+	sub.Text = opts.isStadium() and "ANPFIFF  ·  SPECTRA DOME" or "ANPFIFF  ·  STREET COURT"
 	sub.Parent = card
 	local scale = Instance.new("UIScale")
 	scale.Scale = opts.reducedMotion() and 1 or 0.7
@@ -133,14 +134,14 @@ local function cameraFlight()
 end
 
 ---------------------------------------------------------------- Torjubel im Stadion
-local function pyro(goalX, color)
+local function pyro(goalPos, gw, color)
 	local scale = opts.fxScale()
-	for _, z in ipairs({ -30, -17, 17, 30 }) do
+	for _, dz in ipairs({ -(gw + 18), -(gw + 5), gw + 5, gw + 18 }) do
 		local p = Instance.new("Part")
 		p.Anchored, p.CanCollide, p.CanQuery, p.CanTouch, p.CastShadow = true, false, false, false, false
 		p.Transparency = 1
 		p.Size = Vector3.new(1, 1, 1)
-		p.CFrame = CFrame.new(goalX, 1.5, z)
+		p.CFrame = CFrame.new(goalPos.X, goalPos.Y + 2.5, goalPos.Z + dz)
 		p.Parent = fxFolder
 		local att = Instance.new("Attachment")
 		att.Parent = p
@@ -251,7 +252,7 @@ function Matchday.start(State, gui, options)
 		if t == math.ceil(INTRO_TIME) and not introDone then
 			introDone = true
 			titleCard(gui)
-			cameraFlight()
+			if opts.isStadium() then cameraFlight() end -- der Flug führt durch den SPECTRA DOME
 		end
 	end)
 	State:GetAttributeChangedSignal("Phase"):Connect(function()
@@ -267,11 +268,14 @@ function Matchday.start(State, gui, options)
 			local team = State:GetAttribute("LastGoalTeam") or ""
 			local aurora = State:GetAttribute("LastGoalAurora") == true
 			local color = aurora and AURORA_COLOR or TEAM_COLOR[team] or Color3.new(1, 1, 1)
-			-- Rot greift +X an, Blau −X: Pyro am getroffenen Tor
-			local goalX = (team == "Rot" and 1 or -1) * (HALF_LENGTH + 4)
-			pyro(goalX, color)
-			flashLEDs(color)
-			crowdJump()
+			-- Rot greift +X an, Blau −X: Pyro am getroffenen Tor der eigenen Arena (Lage und Maße aus dem Zustand)
+			local origin = State:GetAttribute("Origin") or Vector3.zero
+			local hl = State:GetAttribute("HalfLength") or HALF_LENGTH
+			pyro(origin + Vector3.new((team == "Rot" and 1 or -1) * (hl + 4), 0, 0), State:GetAttribute("GoalHalfWidth") or 12, color)
+			if opts.isStadium() then
+				flashLEDs(color)
+				crowdJump()
+			end
 		end
 		lastSeq = seq
 	end)

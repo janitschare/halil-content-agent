@@ -13,7 +13,70 @@ local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local SHARED = RS:WaitForChild("UltimatePitch")
-local State = SHARED:WaitForChild("State")
+-- Arena-Sicht (M2): Der Client folgt der Arena, für die der Server den Spieler angemeldet hat (Player-Attribut
+-- UP_Arena). `State` ist eine lokale Kopie des Zustands dieser Arena; HUD, Effekte und Matchday lesen nur sie.
+-- Ohne Anmeldung gilt Phase "Free" (freies Herumlaufen in der Stadt). GoalSeq und MessageId sind lokale Zähler,
+-- die nur bei echten Ereignissen steigen – ein Arenawechsel löst also weder Torjubel noch alte Meldungen aus.
+local StadiumState = SHARED:WaitForChild("State")
+local State = Instance.new("Folder")
+State.Name = "UP_ViewState"
+local carrierView = Instance.new("ObjectValue")
+carrierView.Name = "BallCarrier"
+carrierView.Parent = State
+local VIEW_DEFAULTS = { Phase = "Free", RedScore = 0, BlueScore = 0, TimeLeft = 0, Message = "", LastGoalTeam = "", LastGoalAurora = false,
+	BallOwner = 0, ArenaId = "", Origin = Vector3.zero, HalfLength = 80, HalfWidth = 50, GoalHalfWidth = 12 }
+for k, v in pairs(VIEW_DEFAULTS) do State:SetAttribute(k, v) end
+State:SetAttribute("GoalSeq", 0)
+State:SetAttribute("MessageId", 0)
+local function arenaRoot(id)
+	local base = workspace:FindFirstChild("UltimatePitch")
+	if not base or id == "Stadium" then return base end
+	local arenas = base:FindFirstChild("Arenas")
+	return arenas and arenas:FindFirstChild(id)
+end
+local function ballOf(id)
+	local root = arenaRoot(type(id) == "string" and id or "Stadium")
+	return root and root:FindFirstChild("Ball")
+end
+local function sourceState(id)
+	if id == "Stadium" then return StadiumState end
+	local arenas = SHARED:FindFirstChild("Arenas")
+	local folder = arenas and arenas:FindFirstChild(id)
+	return folder and folder:FindFirstChild("State")
+end
+local viewConns = {}
+local function bindArena(id)
+	for _, c in ipairs(viewConns) do c:Disconnect() end
+	table.clear(viewConns)
+	local src = type(id) == "string" and id ~= "" and sourceState(id) or nil
+	if not src then
+		for k, v in pairs(VIEW_DEFAULTS) do State:SetAttribute(k, v) end
+		carrierView.Value = nil
+		return
+	end
+	local srcGoal, srcMsg = src:GetAttribute("GoalSeq") or 0, src:GetAttribute("MessageId") or 0
+	local function copy(name)
+		local v = src:GetAttribute(name)
+		if name == "GoalSeq" then
+			if (v or 0) > srcGoal then State:SetAttribute("GoalSeq", (State:GetAttribute("GoalSeq") or 0) + 1) end
+			srcGoal = v or 0
+		elseif name == "MessageId" then
+			if (v or 0) > srcMsg then State:SetAttribute("MessageId", (State:GetAttribute("MessageId") or 0) + 1) end
+			srcMsg = v or 0
+		else
+			State:SetAttribute(name, v)
+		end
+	end
+	for name in pairs(src:GetAttributes()) do
+		if name ~= "GoalSeq" and name ~= "MessageId" then copy(name) end
+	end
+	table.insert(viewConns, src.AttributeChanged:Connect(copy))
+	local carrier = src:FindFirstChild("BallCarrier")
+	if carrier then
+		carrierView.Value = carrier.Value
+		table.insert(viewConns, carrier.Changed:Connect(function(model) carrierView.Value = model end))
+	end
+end
 local Kick = SHARED:WaitForChild("Kick")
 local Effect = SHARED:WaitForChild("Effect")
 local AuroraFX = require(script:WaitForChild("AuroraFX"))
@@ -78,7 +141,7 @@ local function showMsg(text)
 end
 
 local function fmt(t) return string.format("%d:%02d", t // 60, t % 60) end
-local PHASE_TEXT = { Lobby = "LOBBY · WARTE AUF SPIELER", Playing = "LIVE · SPECTRA DOME", GoldenGoal = "GOLDEN GOAL",
+local PHASE_TEXT = { Lobby = "LOBBY · WARTE AUF SPIELER", Playing = "LIVE", GoldenGoal = "GOLDEN GOAL",
 	Goal = "TOR", End = "ABPFIFF" }
 local function refresh()
 	local r, b = State:GetAttribute("RedScore") or 0, State:GetAttribute("BlueScore") or 0
@@ -133,9 +196,22 @@ local skillText = make("TextLabel", { Size = UDim2.new(1, 0, 0, 18), Position = 
 local hint = make("TextLabel", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -10), Size = UDim2.new(0.5, -200, 0, 16),
 	TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.3, TextTruncate = Enum.TextTruncate.AtEnd,
 	Text = touchOnly and "Schuss halten = aufladen · Pass · Sprint · AURORA · FX/GFX oben rechts"
-		or "F/Klick halten Schuss · E Pass · Shift Sprint · R AURORA · M Effekte · G Grafik" })
+		or "F/Klick halten Schuss · E Pass · Shift Sprint · R AURORA · M Effekte · G Grafik · L Verlassen" })
 local gfxLabel = make("TextLabel", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 14, 1, -28), Size = UDim2.fromOffset(240, 14),
 	TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.45, Text = "" })
+
+-- Frei in der Stadt (nirgends angemeldet): Match-Anzeigen aus, Hinweis auf die Pads an
+local MATCH_HINT = hint.Text
+local cityHint = corner(make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 14), Size = UDim2.fromOffset(560, 32),
+	BackgroundColor3 = PANEL, BackgroundTransparency = 0.25, TextSize = 15,
+	Text = "ULTIMATE CITY  ·  Betritt ein leuchtendes Pad, um einem Match beizutreten" }), 8)
+local function updateFree()
+	local free = (State:GetAttribute("Phase") or "Free") == "Free"
+	bug.Visible, dock.Visible, cityHint.Visible = not free, not free, free
+	hint.Text = free and "SPECTRA DOME: 5 gegen 5  ·  STREET COURT: 3 gegen 3  ·  G Grafik" or MATCH_HINT
+end
+State:GetAttributeChangedSignal("Phase"):Connect(updateFree)
+updateFree()
 
 ---------------------------------------------------------------- Markierung über der eigenen Figur
 local function markOwn(char)
@@ -214,9 +290,11 @@ end)
 local ambience = make("Sound", { Name = "UP_Ambience", SoundId = "rbxassetid://9119562234", Looped = true, Volume = 0.25 }, SoundService) -- Stadium Crowd 1
 local roar = make("Sound", { Name = "UP_GoalRoar", SoundId = "rbxassetid://9120974125", Volume = 0 }, SoundService) -- Wrestling Crowd 1 (Surges)
 ambience:Play()
+local inDome = false -- vom Zonenlicht gesetzt: Stadionatmosphäre gibt es nur im Stadion
 local function ambienceLevel()
 	local ph = State:GetAttribute("Phase") or "Lobby"
 	local target = (ph == "Playing" or ph == "GoldenGoal" or ph == "Goal") and 0.45 or 0.2
+	if not inDome then target = 0 end
 	TweenService:Create(ambience, TweenInfo.new(1.5), { Volume = target }):Play()
 end
 State:GetAttributeChangedSignal("Phase"):Connect(ambienceLevel)
@@ -237,10 +315,10 @@ local function goalRoar(aurora)
 end
 
 ---------------------------------------------------------------- Server-Ereignisse
-Effect.OnClientEvent:Connect(function(kind, userId, arg)
+Effect.OnClientEvent:Connect(function(kind, userId, arg, arenaId)
 	if type(userId) ~= "number" then return end
-	local ball = workspace:FindFirstChild("UltimatePitch") and workspace.UltimatePitch:FindFirstChild("Ball")
-	if kind == "AuroraWindup" then AuroraFX.windup(userId, tonumber(arg) or 0.3)
+	local ball = ballOf(arenaId) -- Ball der Arena, in der die Aktion stattfindet
+	if kind == "AuroraWindup" then AuroraFX.windup(userId, tonumber(arg) or 0.3, ball)
 	elseif kind == "AuroraKick" then AuroraFX.kick(userId, ball)
 	elseif kind == "AuroraCancel" then AuroraFX.cancel(userId)
 	elseif kind == "KickAnim" and typeof(arg) == "Instance" and arg:IsA("Model") then AuroraFX.quickKick(arg, ball) end
@@ -293,6 +371,7 @@ Matchday.start(State, gui, {
 	reducedMotion = function() return AuroraFX.reducedMotion end,
 	fxScale = function() return AuroraFX.fxScale end,
 	profile = function() return profile end,
+	isStadium = function() return State:GetAttribute("ArenaId") == "Stadium" end,
 })
 CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if profile then styleCrowd(p) end end)
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
@@ -336,6 +415,10 @@ RunService.RenderStepped:Connect(function(dt)
 	local p = cam.CFrame.Position
 	local inside = (p.X / DOME_A) ^ 2 + (p.Z / DOME_B) ^ 2 < 1 and p.Y < DOME_TOP
 	local target = inside and 1 or 0
+	if inside ~= inDome then
+		inDome = inside
+		ambienceLevel()
+	end
 	if zoneK == nil then zoneK = target end -- beim Start ohne Überblendung
 	if zoneK ~= target then
 		zoneK = math.clamp(zoneK + (target > zoneK and 1 or -1) * dt, 0, 1)
@@ -423,6 +506,11 @@ CAS:BindAction("UP_Graphics", function(_, st)
 	if st == Enum.UserInputState.Begin then cycleProfile() end
 	return Enum.ContextActionResult.Pass
 end, false, Enum.KeyCode.G)
+-- Match verlassen und zurück in die Stadt: nur eine Absicht, die Abmeldung macht der Server
+CAS:BindAction("UP_Leave", function(_, st)
+	if st == Enum.UserInputState.Begin and State:GetAttribute("Phase") ~= "Free" then Kick:FireServer("Leave") end
+	return Enum.ContextActionResult.Pass
+end, false, Enum.KeyCode.L)
 
 -- Touch-Geräte haben keine M-/G-Taste: kleine Schalter oben rechts
 if UIS.TouchEnabled then
@@ -438,9 +526,14 @@ if UIS.TouchEnabled then
 	end)
 	fx.Text = AuroraFX.reducedMotion and "FX–" or "FX"
 	topButton("UP_GFXToggle", -72, "GFX", function() cycleProfile() end)
+	topButton("UP_LeaveBtn", -134, "EXIT", function() if State:GetAttribute("Phase") ~= "Free" then Kick:FireServer("Leave") end end)
 end
 
 CAS:SetPosition("UP_Shot", UDim2.new(0.15, 0, 0.05, 0))
 CAS:SetPosition("UP_Pass", UDim2.new(-0.25, 0, 0.45, 0))
 CAS:SetPosition("UP_Sprint", UDim2.new(-0.25, 0, 0.0, 0))
 CAS:SetPosition("UP_Aurora", UDim2.new(0.15, 0, 0.5, 0))
+
+-- Arena-Sicht starten: aktuelle Anmeldung übernehmen und Änderungen folgen
+player:GetAttributeChangedSignal("UP_Arena"):Connect(function() bindArena(player:GetAttribute("UP_Arena")) end)
+bindArena(player:GetAttribute("UP_Arena"))
