@@ -14,7 +14,8 @@
       "StarterPlayerScripts": {
         "UltimatePitchClient": {
           "$path": "src/Client.client.lua",
-          "AuroraFX": { "$path": "src/AuroraFX.lua" }
+          "AuroraFX": { "$path": "src/AuroraFX.lua" },
+          "Matchday": { "$path": "src/Matchday.lua" }
         }
       }
     }

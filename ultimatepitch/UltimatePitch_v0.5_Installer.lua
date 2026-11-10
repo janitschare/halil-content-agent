@@ -2058,6 +2058,13 @@ local function applyProfile(name)
 	AuroraFX.fxScale = name == "Niedrig" and 0.5 or 1
 	gfxLabel.Text = "GRAFIK: " .. string.upper(name) .. (touchOnly and "" or "  (G)")
 end
+-- Matchday-Atmosphäre: Anstoß-Intro und Torjubel im Stadion (rein optisch, siehe Matchday.lua)
+local Matchday = require(script:WaitForChild("Matchday"))
+Matchday.start(State, gui, {
+	reducedMotion = function() return AuroraFX.reducedMotion end,
+	fxScale = function() return AuroraFX.fxScale end,
+	profile = function() return profile end,
+})
 CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if profile then styleCrowd(p) end end)
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())
@@ -2849,6 +2856,278 @@ end
 
 return AuroraFX
 ]==] ca.Parent = c
+local cm = Instance.new("ModuleScript") cm.Name = "Matchday" cm.Source = [==[-- UltimatePitch · Matchday-Atmosphäre (ModuleScript unter UltimatePitchClient)
+-- Rein optisch, je Client, reagiert nur auf serverbestätigte Zustände (State@Phase, State@GoalSeq):
+--   * Anstoß-Intro: kurzer Kameraflug durch den SPECTRA DOME + Einblendung „ROT vs BLAU“ beim Matchstart
+--   * Torjubel im Stadion: Pyro-Fontänen am Tor, LED-Ringe blinken in Teamfarbe, Publikum springt
+-- Reduzierte Bewegung: kein Kameraflug, kein Blinken, kein Springen (nur Einblendung bzw. ruhige Teamfarbe).
+-- Grafikprofil: Publikum springt nur im Profil „Hoch“, Pyro-Menge skaliert mit fxScale.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
+local Debris = game:GetService("Debris")
+
+local Matchday = {}
+
+local TEAM_COLOR = { Rot = Color3.fromRGB(230, 40, 55), Blau = Color3.fromRGB(40, 100, 255) }
+local AURORA_COLOR = Color3.fromRGB(70, 255, 150)
+local HALF_LENGTH = 80
+local INTRO_TIME = 3.2
+local CELEBRATE_TIME = 2.4
+
+local opts = { reducedMotion = function() return false end, fxScale = function() return 1 end, profile = function() return "Hoch" end }
+
+local fxFolder = Instance.new("Folder")
+fxFolder.Name = "UP_MatchdayFX"
+fxFolder.Parent = workspace
+
+---------------------------------------------------------------- Anstoß-Intro
+local function titleCard(gui)
+	local card = Instance.new("Frame")
+	card.Name = "UP_KickoffCard"
+	card.AnchorPoint = Vector2.new(0.5, 0.5)
+	card.Position = UDim2.fromScale(0.5, 0.42)
+	card.Size = UDim2.fromOffset(460, 110)
+	card.BackgroundColor3 = Color3.fromRGB(10, 14, 24)
+	card.BackgroundTransparency = 0.15
+	card.BorderSizePixel = 0
+	card.Parent = gui
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 12)
+	local function chip(x, text, color)
+		local c = Instance.new("TextLabel")
+		c.AnchorPoint = Vector2.new(0.5, 0)
+		c.Position = UDim2.new(0.5, x, 0, 14)
+		c.Size = UDim2.fromOffset(150, 48)
+		c.BackgroundColor3 = color
+		c.BorderSizePixel = 0
+		c.Font = Enum.Font.GothamBlack
+		c.TextSize = 30
+		c.TextColor3 = Color3.new(1, 1, 1)
+		c.Text = text
+		c.Parent = card
+		Instance.new("UICorner", c).CornerRadius = UDim.new(0, 8)
+		return c
+	end
+	chip(-110, "ROT", TEAM_COLOR.Rot)
+	chip(110, "BLAU", TEAM_COLOR.Blau)
+	local vs = Instance.new("TextLabel")
+	vs.AnchorPoint = Vector2.new(0.5, 0)
+	vs.Position = UDim2.new(0.5, 0, 0, 14)
+	vs.Size = UDim2.fromOffset(60, 48)
+	vs.BackgroundTransparency = 1
+	vs.Font = Enum.Font.GothamBlack
+	vs.TextSize = 24
+	vs.TextColor3 = Color3.fromRGB(255, 220, 90)
+	vs.Text = "vs"
+	vs.Parent = card
+	local sub = Instance.new("TextLabel")
+	sub.Position = UDim2.fromOffset(0, 70)
+	sub.Size = UDim2.new(1, 0, 0, 28)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.GothamBold
+	sub.TextSize = 16
+	sub.TextColor3 = Color3.fromRGB(40, 210, 255)
+	sub.Text = "ANPFIFF  ·  SPECTRA DOME"
+	sub.Parent = card
+	local scale = Instance.new("UIScale")
+	scale.Scale = opts.reducedMotion() and 1 or 0.7
+	scale.Parent = card
+	if not opts.reducedMotion() then
+		TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+	task.delay(INTRO_TIME - 0.5, function()
+		for _, d in ipairs(card:GetDescendants()) do
+			if d:IsA("TextLabel") then
+				TweenService:Create(d, TweenInfo.new(0.4), { TextTransparency = 1, BackgroundTransparency = 1 }):Play()
+			end
+		end
+		TweenService:Create(card, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+	end)
+	Debris:AddItem(card, INTRO_TIME + 0.2)
+end
+
+-- Kameraflug: von hoch über der Ecke in einem Bogen zur Spielfeldmitte; danach immer zurück zur Standardkamera
+local introToken = 0
+local function cameraFlight()
+	local cam = workspace.CurrentCamera
+	if not cam or opts.reducedMotion() then return end
+	introToken += 1
+	local my = introToken
+	local center = Vector3.new(0, 4, 0)
+	-- Flugbahn innerhalb des Kessels (Innenkante x ±118 / z ±74, Dach 50): von der Ecke über die Längsseite
+	local keys = {
+		CFrame.lookAt(Vector3.new(-100, 42, -52), center),
+		CFrame.lookAt(Vector3.new(-25, 34, -62), center),
+		CFrame.lookAt(Vector3.new(70, 24, -46), center),
+	}
+	local function restore()
+		if my ~= introToken then return end
+		local c = workspace.CurrentCamera
+		if c then
+			c.CameraType = Enum.CameraType.Custom
+			local hum = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if hum then c.CameraSubject = hum end
+		end
+	end
+	local ok = pcall(function()
+		cam.CameraType = Enum.CameraType.Scriptable
+		cam.CFrame = keys[1]
+		local seg = (INTRO_TIME - 0.4) / (#keys - 1)
+		for i = 2, #keys do
+			local tw = TweenService:Create(cam, TweenInfo.new(seg, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { CFrame = keys[i] })
+			task.delay(seg * (i - 2), function() if my == introToken then tw:Play() end end)
+		end
+	end)
+	-- Rückgabe der Kamera ist garantiert (auch bei Fehler oder Abbruch)
+	task.delay(ok and INTRO_TIME or 0, restore)
+end
+
+---------------------------------------------------------------- Torjubel im Stadion
+local function pyro(goalX, color)
+	local scale = opts.fxScale()
+	for _, z in ipairs({ -30, -17, 17, 30 }) do
+		local p = Instance.new("Part")
+		p.Anchored, p.CanCollide, p.CanQuery, p.CanTouch, p.CastShadow = true, false, false, false, false
+		p.Transparency = 1
+		p.Size = Vector3.new(1, 1, 1)
+		p.CFrame = CFrame.new(goalX, 1.5, z)
+		p.Parent = fxFolder
+		local att = Instance.new("Attachment")
+		att.Parent = p
+		local pe = Instance.new("ParticleEmitter")
+		pe.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)), ColorSequenceKeypoint.new(0.3, color),
+			ColorSequenceKeypoint.new(1, color) })
+		pe.LightEmission = 1
+		pe.LightInfluence = 0
+		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 0) })
+		pe.Transparency = NumberSequence.new(0.05, 1)
+		pe.Lifetime = NumberRange.new(1, 1.6)
+		pe.Speed = NumberRange.new(40, 62)
+		pe.SpreadAngle = Vector2.new(10, 10)
+		pe.EmissionDirection = Enum.NormalId.Top
+		pe.Acceleration = Vector3.new(0, -35, 0)
+		pe.Rate = 110 * scale
+		pe.Parent = att
+		local light = Instance.new("PointLight")
+		light.Color = color
+		light.Range = 24
+		light.Brightness = 4
+		light.Parent = p
+		TweenService:Create(light, TweenInfo.new(1.8), { Brightness = 0 }):Play()
+		task.delay(1.6, function() pe.Enabled = false end)
+		Debris:AddItem(p, 3.5)
+	end
+end
+
+local ledToken = 0
+local function flashLEDs(color)
+	local root = workspace:FindFirstChild("UltimatePitch")
+	local dome = root and root:FindFirstChild("SpectraDome")
+	local led = dome and dome:FindFirstChild("LED")
+	if not led then return end
+	ledToken += 1
+	local my = ledToken
+	local parts, base = {}, {}
+	for _, p in ipairs(led:GetChildren()) do
+		if p:IsA("BasePart") then
+			table.insert(parts, p)
+			base[p] = p:GetAttribute("UP_BaseColor") or p.Color
+			p:SetAttribute("UP_BaseColor", base[p]) -- Grundfarbe merken, auch bei überlappenden Toren
+		end
+	end
+	local steady = opts.reducedMotion()
+	local t0 = os.clock()
+	local conn
+	conn = RunService.Heartbeat:Connect(function()
+		local t = os.clock() - t0
+		if my ~= ledToken or t > CELEBRATE_TIME then
+			conn:Disconnect()
+			if my == ledToken then
+				for _, p in ipairs(parts) do p.Color = base[p] end
+			end
+			return
+		end
+		local on = steady or (math.floor(t / 0.22) % 2 == 0)
+		local c = on and color or Color3.new(1, 1, 1)
+		for _, p in ipairs(parts) do p.Color = c end
+	end)
+end
+
+local crowdToken = 0
+local function crowdJump()
+	if opts.reducedMotion() or opts.profile() ~= "Hoch" then return end
+	crowdToken += 1
+	local my = crowdToken
+	local fans = CollectionService:GetTagged("UP_CrowdDetail")
+	local base, phase = {}, {}
+	local rng = Random.new()
+	for _, p in ipairs(fans) do
+		base[p] = p:GetAttribute("UP_BaseCFrame") or p.CFrame
+		p:SetAttribute("UP_BaseCFrame", base[p])
+		phase[p] = rng:NextNumber(0, math.pi * 2)
+	end
+	local t0, acc = os.clock(), 0
+	local conn
+	conn = RunService.Heartbeat:Connect(function(dt)
+		local t = os.clock() - t0
+		if my ~= crowdToken or t > CELEBRATE_TIME then
+			conn:Disconnect()
+			if my == crowdToken then
+				for _, p in ipairs(fans) do if p.Parent then p.CFrame = base[p] end end
+			end
+			return
+		end
+		acc += dt
+		if acc < 1 / 30 then return end -- 30 Hz genügen für das Springen und schonen schwache Geräte
+		acc = 0
+		local fade = math.min(1, (CELEBRATE_TIME - t) / 0.4)
+		for _, p in ipairs(fans) do
+			if p.Parent then
+				p.CFrame = base[p] + Vector3.new(0, math.abs(math.sin(t * 9 + phase[p])) * 0.9 * fade, 0)
+			end
+		end
+	end)
+end
+
+---------------------------------------------------------------- Start
+function Matchday.start(State, gui, options)
+	for k, v in pairs(options or {}) do opts[k] = v end
+	local lastPhase = State:GetAttribute("Phase")
+	State:GetAttributeChangedSignal("Phase"):Connect(function()
+		local ph = State:GetAttribute("Phase")
+		-- Matchbeginn = Wechsel aus der Vorbereitungsphase ins laufende Spiel (nicht nach jedem Tor)
+		if lastPhase == "Intermission" and ph == "Playing" then
+			titleCard(gui)
+			cameraFlight()
+		end
+		lastPhase = ph
+	end)
+	local lastSeq = State:GetAttribute("GoalSeq") or 0
+	State:GetAttributeChangedSignal("GoalSeq"):Connect(function()
+		local seq = State:GetAttribute("GoalSeq") or 0
+		if seq > lastSeq then
+			local team = State:GetAttribute("LastGoalTeam") or ""
+			local aurora = State:GetAttribute("LastGoalAurora") == true
+			local color = aurora and AURORA_COLOR or TEAM_COLOR[team] or Color3.new(1, 1, 1)
+			-- Rot greift +X an, Blau −X: Pyro am getroffenen Tor
+			local goalX = (team == "Rot" and 1 or -1) * (HALF_LENGTH + 4)
+			pyro(goalX, color)
+			flashLEDs(color)
+			crowdJump()
+		end
+		lastSeq = seq
+	end)
+	-- Respawn während des Intros: Kamera sofort freigeben
+	Players.LocalPlayer.CharacterAdded:Connect(function()
+		introToken += 1
+		local c = workspace.CurrentCamera
+		if c then c.CameraType = Enum.CameraType.Custom end
+	end)
+end
+
+return Matchday
+]==] cm.Parent = c
 s.Parent = SSS
 c.Parent = SPS
 game:GetService("ChangeHistoryService"):SetWaypoint("UltimatePitch v0.5")

@@ -288,6 +288,13 @@ local function applyProfile(name)
 	AuroraFX.fxScale = name == "Niedrig" and 0.5 or 1
 	gfxLabel.Text = "GRAFIK: " .. string.upper(name) .. (touchOnly and "" or "  (G)")
 end
+-- Matchday-Atmosphäre: Anstoß-Intro und Torjubel im Stadion (rein optisch, siehe Matchday.lua)
+local Matchday = require(script:WaitForChild("Matchday"))
+Matchday.start(State, gui, {
+	reducedMotion = function() return AuroraFX.reducedMotion end,
+	fxScale = function() return AuroraFX.fxScale end,
+	profile = function() return profile end,
+})
 CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if profile then styleCrowd(p) end end)
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())

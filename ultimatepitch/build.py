@@ -1,6 +1,6 @@
 """Baut aus src/ die Place-Datei (.rbxlx) und den Command-Bar-Installer.
 
-Server-Script mit Kind-Modul Dome, Client-LocalScript mit Kind-Modul AuroraFX.
+Server-Script mit Kind-Modul Dome, Client-LocalScript mit Kind-Modulen AuroraFX und Matchday.
 build.ps1 ist das PowerShell-Gegenstück und erzeugt dieselben Dateien.
 """
 from pathlib import Path
@@ -19,6 +19,7 @@ server = src("Server.server.lua")
 client = src("Client.client.lua")
 dome = src("Dome.lua")
 aurora = src("AuroraFX.lua")
+matchday = src("Matchday.lua")
 
 
 def item(cls, ref, name, source, children=""):
@@ -37,7 +38,7 @@ rbxlx = f'''<roblox version="4">
 </Item>
 <Item class="StarterPlayer" referent="RBX3"><Properties><string name="Name">StarterPlayer</string></Properties>
 <Item class="StarterPlayerScripts" referent="RBX4"><Properties><string name="Name">StarterPlayerScripts</string></Properties>
-{item("LocalScript", "RBX5", "UltimatePitchClient", client, item("ModuleScript", "RBX7", "AuroraFX", aurora))}
+{item("LocalScript", "RBX5", "UltimatePitchClient", client, item("ModuleScript", "RBX7", "AuroraFX", aurora) + item("ModuleScript", "RBX9", "Matchday", matchday))}
 </Item></Item>
 </roblox>
 '''
@@ -76,6 +77,7 @@ local s = Instance.new("Script") s.Name = "UltimatePitchServer" s.Source = [==[{
 local sd = Instance.new("ModuleScript") sd.Name = "Dome" sd.Source = [==[{dome}]==] sd.Parent = s
 local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[{client}]==]
 local ca = Instance.new("ModuleScript") ca.Name = "AuroraFX" ca.Source = [==[{aurora}]==] ca.Parent = c
+local cm = Instance.new("ModuleScript") cm.Name = "Matchday" cm.Source = [==[{matchday}]==] cm.Parent = c
 s.Parent = SSS
 c.Parent = SPS
 game:GetService("ChangeHistoryService"):SetWaypoint("UltimatePitch v{V}")

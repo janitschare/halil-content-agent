@@ -1,6 +1,6 @@
 ﻿# Baut aus src/ die Place-Datei (.rbxlx) und den Command-Bar-Installer (PowerShell-Gegenstück zu build.py).
 #   ServerScriptService.UltimatePitchServer (Script)          <- src/Server.server.lua, Kind-Modul Dome <- src/Dome.lua
-#   StarterPlayerScripts.UltimatePitchClient (LocalScript)    <- src/Client.client.lua, Kind-Modul AuroraFX <- src/AuroraFX.lua
+#   StarterPlayerScripts.UltimatePitchClient (LocalScript)    <- src/Client.client.lua, Kind-Module AuroraFX <- src/AuroraFX.lua, Matchday <- src/Matchday.lua
 # Aufruf: powershell -ExecutionPolicy Bypass -File build.ps1
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
@@ -16,6 +16,7 @@ $server = Src "Server.server.lua"
 $client = Src "Client.client.lua"
 $dome = Src "Dome.lua"
 $aurora = Src "AuroraFX.lua"
+$matchday = Src "Matchday.lua"
 
 function Item([string]$cls, [string]$ref, [string]$name, [string]$src, [string]$children) {
     $disabled = if ($cls -eq "ModuleScript") { "" } else { "<bool name=`"Disabled`">false</bool>" }
@@ -34,7 +35,7 @@ $rbxlx = "<roblox version=`"4`">`n" +
     "</Item>`n" +
     "<Item class=`"StarterPlayer`" referent=`"RBX3`"><Properties><string name=`"Name`">StarterPlayer</string></Properties>`n" +
     "<Item class=`"StarterPlayerScripts`" referent=`"RBX4`"><Properties><string name=`"Name`">StarterPlayerScripts</string></Properties>`n" +
-    (Item "LocalScript" "RBX5" "UltimatePitchClient" $client (Item "ModuleScript" "RBX7" "AuroraFX" $aurora "")) + "`n" +
+    (Item "LocalScript" "RBX5" "UltimatePitchClient" $client ((Item "ModuleScript" "RBX7" "AuroraFX" $aurora "") + (Item "ModuleScript" "RBX9" "Matchday" $matchday ""))) + "`n" +
     "</Item></Item>`n" +
     "</roblox>`n"
 [IO.File]::WriteAllText((Join-Path $here "UltimatePitch_v$V.rbxlx"), $rbxlx, $enc)
@@ -72,6 +73,7 @@ $installer = "-- UltimatePitch v$V – Command-Bar-Installer (Alternative zur .r
     "local sd = Instance.new(`"ModuleScript`") sd.Name = `"Dome`" sd.Source = [==[$dome]==] sd.Parent = s`n" +
     "local c = Instance.new(`"LocalScript`") c.Name = `"UltimatePitchClient`" c.Source = [==[$client]==]`n" +
     "local ca = Instance.new(`"ModuleScript`") ca.Name = `"AuroraFX`" ca.Source = [==[$aurora]==] ca.Parent = c`n" +
+    "local cm = Instance.new(`"ModuleScript`") cm.Name = `"Matchday`" cm.Source = [==[$matchday]==] cm.Parent = c`n" +
     "s.Parent = SSS`n" +
     "c.Parent = SPS`n" +
     "game:GetService(`"ChangeHistoryService`"):SetWaypoint(`"UltimatePitch v$V`")`n" +
