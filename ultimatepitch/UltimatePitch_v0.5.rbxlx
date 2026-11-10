@@ -2337,10 +2337,11 @@ return City
 -- Absichten (Scout-Angebot annehmen, Artikel kaufen/anlegen); jede Absicht wird auf Stufe, Preis, Guthaben,
 -- Besitz und Nähe zum NPC/Laden geprüft und gedrosselt.
 -- SPEICHERSTAND (freigegeben 10.11.2026): dauerhaft per DataStore "UP_Career_v1" über CareerStore (UpdateAsync mit
--- Sitzungssperre). Laden beim Betreten, Autosave alle 60 s bei Änderungen, letzter Stand beim Verlassen und beim
--- Herunterfahren. In einer nicht veröffentlichten Place (Studio, PlaceId 0) gibt es keinen DataStore: Fortschritt gilt
--- dann nur für die Sitzung ("off"). Studio-Testmodus: Workspace-Attribut UP_CareerMemoryStore = true vor dem Start
--- nutzt eine Speicher-Attrappe und legt ServerStorage.UP_CareerTest (BindableFunction) für Prüfungen an.
+-- Sitzungssperre). Laden beim Betreten, Autosave alle 60 s (erneuert zugleich die Sperre), letzter Stand beim Verlassen
+-- und beim Herunterfahren. Studio greift nie auf den Live-Datenbestand zu: ohne Attribut "off" (nur diese Sitzung);
+-- Workspace-Attribut UP_CareerMemoryStore = true vor dem Start nutzt eine Speicher-Attrappe und legt
+-- ServerStorage.UP_CareerTest (BindableFunction) für Prüfungen an; UP_CareerStudioDataStore = true nutzt in einer
+-- veröffentlichten Test-Place den getrennten DataStore "UP_Career_v1_STUDIO".
 -- Keine Robux, keine Zufallspakete: Coins gibt es nur fürs Spielen.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2373,7 +2374,7 @@ end
 local INTERACT_RANGE = 14 -- Studs zwischen Spieler und Scout bzw. Ladentheke
 local REQUEST_GAP = 0.3   -- Sekunden zwischen zwei Anfragen eines Spielers
 
-local AUTOSAVE = 60       -- Sekunden zwischen zwei Autosave-Durchläufen (nur geänderte Spielstände)
+local AUTOSAVE = 60       -- Sekunden zwischen zwei Autosave-Durchläufen; jeder Durchlauf erneuert die Sitzungssperre
 
 -- [Player] = { coins, stage, owned = {id=true}, equipped = {slot=id}, matches, goals,
 --              save = "loading"|"ok"|"off"|"error"|"lost", dirty, saving, left, final }
@@ -2617,7 +2618,18 @@ end
 -- Laden beim Betreten. Was in den Sekunden davor verdient wurde (Matchende), wird zum geladenen Stand addiert.
 local function loadPlayer(plr, d)
 	pending += 1
-	local status, loaded = persist.load(plr.UserId)
+	local status, loaded, token = persist.load(plr.UserId, function()
+		-- wird nur aufgerufen, wenn das Laden länger dauert (fremde Sperre beim Serverwechsel oder Störung)
+		if not d.waitNotified then
+			d.waitNotified = true
+			toast(plr, "Dein Spielstand wird geladen – das dauert gerade etwas länger. Käufe sind gleich wieder möglich.")
+		end
+		return d.left
+	end)
+	if status == "cancelled" then
+		pending -= 1
+		return
+	end
 	if status ~= "ok" then
 		warn("[Career] Laden fehlgeschlagen für " .. plr.UserId .. ": " .. tostring(loaded))
 		setSave(plr, d, "error")
@@ -2631,10 +2643,11 @@ local function loadPlayer(plr, d)
 	local earned = d.coins > 0 or d.matches > 0 or d.stage > 1
 	d.coins, d.stage, d.owned, d.equipped = loaded.coins, loaded.stage, loaded.owned, loaded.equipped
 	d.matches, d.goals = loaded.matches, loaded.goals
+	d.token = token
 	d.save = "ok"
 	if d.left then
 		-- während des Ladens gegangen: Stand sofort zurückschreiben und Sperre freigeben
-		persist.save(plr.UserId, d, true)
+		persist.save(plr.UserId, d, d.token, true)
 	else
 		sync(plr, true)
 		d.dirty = earned
@@ -2649,7 +2662,7 @@ local function saveNow(plr, d, release)
 	if d.save ~= "ok" or (d.final and not release) then return end
 	d.saving = true
 	d.dirty = false
-	local status, err = persist.save(plr.UserId, d, release)
+	local status, err = persist.save(plr.UserId, d, d.token, release)
 	d.saving = false
 	if status == "lost" then
 		setSave(plr, d, "lost")
@@ -2675,7 +2688,8 @@ local function autosaveLoop()
 	while true do
 		task.wait(AUTOSAVE)
 		for plr, d in pairs(data) do
-			if d.save == "ok" and d.dirty and not d.left and not d.saving then
+			-- auch unveränderte Stände speichern: nur so bleibt die Sitzungssperre frisch
+			if d.save == "ok" and not d.left and not d.saving then
 				task.spawn(saveNow, plr, d, false)
 				task.wait(0.5) -- Anfragen verteilen
 			end
@@ -2700,7 +2714,7 @@ local function testHook()
 		elseif cmd == "flush" then
 			local n = 0
 			for p, d in pairs(data) do
-				if d.save == "ok" and d.dirty then saveNow(p, d, false) n += 1 end
+				if d.save == "ok" and not d.left then saveNow(p, d, false) n += 1 end
 			end
 			return n
 		elseif cmd == "rejoin" and plr and data[plr] then
@@ -2748,13 +2762,21 @@ function Career.init(cityFolder, L)
 	scoutRoot = buildScout(cityFolder, scoutPos, Vector3.new(L.plaza.X, gy + 3, L.plaza.Z))
 	-- Theke vor dem Fashion District (erste Ladenfront links)
 	shopRoot = buildShop(cityFolder, Vector3.new(L.plaza.X - 56, gy, L.plaza.Z - 42 - 22 + 18))
-	-- Speicher wählen: Studio-Testmodus (Attrappe) > DataStore in veröffentlichten Places > kein Speichern
-	local storeObj
-	if RunService:IsStudio() and workspace:GetAttribute("UP_CareerMemoryStore") == true then
-		memoryStore = CareerStore.memory()
-		storeObj = memoryStore
+	-- Speicher wählen. Live-Server einer veröffentlichten Place: DataStore "UP_Career_v1". Studio nie den Live-Bestand:
+	-- Attrappe (UP_CareerMemoryStore), getrennter Studio-DataStore (UP_CareerStudioDataStore) oder kein Speichern.
+	local storeObj, storeName
+	if RunService:IsStudio() then
+		if workspace:GetAttribute("UP_CareerMemoryStore") == true then
+			memoryStore = CareerStore.memory()
+			storeObj = memoryStore
+		elseif workspace:GetAttribute("UP_CareerStudioDataStore") == true and game.PlaceId ~= 0 then
+			storeName = "UP_Career_v1_STUDIO"
+		end
 	elseif game.PlaceId ~= 0 then
-		local ok, ds = pcall(function() return DataStoreService:GetDataStore("UP_Career_v1") end)
+		storeName = "UP_Career_v1"
+	end
+	if storeName then
+		local ok, ds = pcall(function() return DataStoreService:GetDataStore(storeName) end)
 		if ok then storeObj = ds else warn("[Career] DataStore nicht verfügbar: " .. tostring(ds)) end
 	end
 	if storeObj then
@@ -2763,7 +2785,7 @@ function Career.init(cityFolder, L)
 		task.spawn(autosaveLoop)
 		if memoryStore then testHook() end
 	end
-	print("[Career] Speicherstand: " .. (memoryStore and "Studio-Attrappe" or storeObj and "DataStore UP_Career_v1" or "aus (nur diese Sitzung)"))
+	print("[Career] Speicherstand: " .. (memoryStore and "Studio-Attrappe" or storeObj and ("DataStore " .. storeName) or "aus (nur diese Sitzung)"))
 	remote.OnServerEvent:Connect(onRequest)
 	Players.PlayerAdded:Connect(onPlayer)
 	for _, p in ipairs(Players:GetPlayers()) do onPlayer(p) end
@@ -2783,11 +2805,12 @@ end
 return Career
 ]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX13"><Properties><string name="Name">CareerStore</string><ProtectedString name="Source"><![CDATA[-- UltimatePitch · dauerhafter Karriere-Speicherstand (ModuleScript unter UltimatePitchServer, nur Server)
 -- Ein Datensatz je Spieler (Schlüssel "u_<UserId>") mit Coins, Stufe, Besitz, Ausrüstung und Statistik.
--- Alle Zugriffe laufen über UpdateAsync mit einer Sitzungssperre (lock = { job = JobId, t = os.time() }):
---   * Laden sperrt den Datensatz für diesen Server. Hält ein anderer Server noch eine frische Sperre (er speichert
---     z. B. gerade beim Serverwechsel), wird kurz gewartet; erst nach mehreren Versuchen oder bei einer verwaisten
---     Sperre (älter als LOCK_TIMEOUT, Server abgestürzt) übernimmt dieser Server.
---   * Speichern schreibt nur, solange die Sperre diesem Server gehört; sonst "lost" (kein Überschreiben fremder Stände).
+-- Alle Zugriffe laufen über UpdateAsync mit einer Sitzungssperre (lock = { job = JobId, sid = Ladekennung, t = os.time() }):
+--   * Laden sperrt den Datensatz für genau diesen Ladevorgang. Ist eine Sperre noch frisch (ein anderer Server spielt
+--     oder speichert gerade beim Serverwechsel), wird gewartet, bis sie freigegeben wird oder abläuft – nie übernommen.
+--   * Der haltende Server erneuert seine Sperre mit jedem Autosave (Aufrufer: regelmäßig, auch ohne Änderungen);
+--     eine Sperre älter als LOCK_TIMEOUT stammt von einem abgestürzten Server und darf übernommen werden.
+--   * Speichern schreibt nur, solange genau die eigene Sperre im Datensatz steht; sonst "lost".
 --   * Verlassen speichert ein letztes Mal und gibt die Sperre frei.
 -- Schlägt das Laden fehl, liefert load "error": Der Aufrufer speichert dann für diesen Spieler nichts, damit ein
 -- vorhandener Spielstand nicht durch einen leeren überschrieben wird.
@@ -2840,29 +2863,35 @@ function CareerStore.serialize(d)
 		matches = d.matches, goals = d.goals }
 end
 
--- store: DataStore oder CareerStore.memory(); opts = { jobId, items, stages, now?, wait?, retries?, lockWaits?, lockWait? }
+-- store: DataStore oder CareerStore.memory()
+-- opts = { jobId, items, stages, now?, wait?, newToken?, retries?, lockWait?, maxLockWait? }
 function CareerStore.new(store, opts)
 	local self = {}
 	local jobId = opts.jobId
 	local now = opts.now or os.time
 	local wait = opts.wait or task.wait
-	local retries = opts.retries or 4      -- Fehlversuche (Netz/Budget) bis "error"
-	local lockWaits = opts.lockWaits or 5  -- Warteschleifen auf eine fremde Sperre bis zur Übernahme
-	local lockWait = opts.lockWait or 3
+	local newToken = opts.newToken or function() return HttpService:GenerateGUID(false) end
+	local retries = opts.retries or 4 -- Fehlversuche (Netz/Budget) bis "error"
+	local lockWait = opts.lockWait or 5 -- Sekunden zwischen zwei Versuchen bei fremder Sperre
+	-- so lange höchstens auf eine fremde, frische Sperre warten (sie läuft spätestens nach LOCK_TIMEOUT ab, weil
+	-- der haltende Server sie nur durch regelmäßiges Speichern erneuert); danach "error" statt Übernahme
+	local maxLockWait = opts.maxLockWait or (CareerStore.LOCK_TIMEOUT + 30)
 
-	local function foreignLock(old, includeStale)
+	-- Sperre eines anderen Ladevorgangs (anderer Server oder früherer Beitritt), die noch nicht abgelaufen ist
+	local function freshLock(old)
 		local lock = type(old) == "table" and old.lock
-		if type(lock) ~= "table" or lock.job == jobId then return false end
-		if includeStale then return true end
-		return type(lock.t) == "number" and now() - lock.t < CareerStore.LOCK_TIMEOUT
+		return type(lock) == "table" and type(lock.t) == "number" and now() - lock.t < CareerStore.LOCK_TIMEOUT
 	end
 
-	-- Lädt und sperrt. Rückgabe: "ok", data | "error", Meldung
-	function self.load(userId)
-		local errors, waits = 0, 0
+	-- Lädt und sperrt. Jeder Ladevorgang erhält eine eigene Kennung (token); nur mit ihr darf später gespeichert
+	-- werden. Eine frische Sperre wird nie übernommen, nur eine freigegebene oder abgelaufene.
+	-- cancelled(): optional, bricht das Warten ab (Spieler hat das Spiel verlassen).
+	-- Rückgabe: "ok", data, token | "error", Meldung | "cancelled"
+	function self.load(userId, cancelled)
+		local errors, waited = 0, 0
+		local token = newToken()
 		while true do
 			local blocked, newer, raw = false, false, nil
-			local steal = waits >= lockWaits
 			local ok, err = pcall(function()
 				store:UpdateAsync(key(userId), function(old)
 					blocked, newer, raw = false, false, old
@@ -2870,19 +2899,21 @@ function CareerStore.new(store, opts)
 						newer = true -- von einer neueren Spielversion geschrieben: nicht anfassen
 						return nil
 					end
-					if not steal and foreignLock(old, false) then
+					if freshLock(old) then
 						blocked = true
 						return nil
 					end
 					local rec = type(old) == "table" and old or {}
-					rec.lock = { job = jobId, t = now() }
+					rec.lock = { job = jobId, sid = token, t = now() }
 					return rec, { userId }
 				end)
 			end)
 			if ok and newer then return "error", "Spielstand stammt aus einer neueren Version" end
-			if ok and not blocked then return "ok", CareerStore.sanitize(raw, opts.items, opts.stages) end
+			if ok and not blocked then return "ok", CareerStore.sanitize(raw, opts.items, opts.stages), token end
+			if cancelled and cancelled() then return "cancelled" end
 			if ok then
-				waits += 1
+				if waited >= maxLockWait then return "error", "Spielstand wird noch von einem anderen Server gehalten" end
+				waited += lockWait
 				wait(lockWait)
 			else
 				errors += 1
@@ -2892,20 +2923,23 @@ function CareerStore.new(store, opts)
 		end
 	end
 
-	-- Speichert (release = Sperre freigeben). Rückgabe: "ok" | "lost" (anderer Server hält den Stand) | "error", Meldung
-	function self.save(userId, data, release)
+	-- Speichert; schreibt nur, wenn der Datensatz noch genau mit der Sperre dieses Ladevorgangs (token) belegt ist.
+	-- Eine fehlende oder fremde Sperre bedeutet: ein anderer Server hat übernommen (und ggf. schon freigegeben).
+	-- release = Sperre freigeben (letztes Speichern). Rückgabe: "ok" | "lost" | "error", Meldung
+	function self.save(userId, data, token, release)
 		local errors = 0
 		while true do
 			local lost = false
 			local ok, err = pcall(function()
 				store:UpdateAsync(key(userId), function(old)
 					lost = false
-					if foreignLock(old, true) then
+					local lock = type(old) == "table" and old.lock
+					if type(lock) ~= "table" or lock.sid ~= token or lock.job ~= jobId then
 						lost = true
 						return nil
 					end
 					local rec = CareerStore.serialize(data)
-					if not release then rec.lock = { job = jobId, t = now() } end
+					if not release then rec.lock = { job = jobId, sid = token, t = now() } end
 					return rec, { userId }
 				end)
 			end)

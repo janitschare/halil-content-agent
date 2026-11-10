@@ -4,10 +4,11 @@
 -- Absichten (Scout-Angebot annehmen, Artikel kaufen/anlegen); jede Absicht wird auf Stufe, Preis, Guthaben,
 -- Besitz und Nähe zum NPC/Laden geprüft und gedrosselt.
 -- SPEICHERSTAND (freigegeben 10.11.2026): dauerhaft per DataStore "UP_Career_v1" über CareerStore (UpdateAsync mit
--- Sitzungssperre). Laden beim Betreten, Autosave alle 60 s bei Änderungen, letzter Stand beim Verlassen und beim
--- Herunterfahren. In einer nicht veröffentlichten Place (Studio, PlaceId 0) gibt es keinen DataStore: Fortschritt gilt
--- dann nur für die Sitzung ("off"). Studio-Testmodus: Workspace-Attribut UP_CareerMemoryStore = true vor dem Start
--- nutzt eine Speicher-Attrappe und legt ServerStorage.UP_CareerTest (BindableFunction) für Prüfungen an.
+-- Sitzungssperre). Laden beim Betreten, Autosave alle 60 s (erneuert zugleich die Sperre), letzter Stand beim Verlassen
+-- und beim Herunterfahren. Studio greift nie auf den Live-Datenbestand zu: ohne Attribut "off" (nur diese Sitzung);
+-- Workspace-Attribut UP_CareerMemoryStore = true vor dem Start nutzt eine Speicher-Attrappe und legt
+-- ServerStorage.UP_CareerTest (BindableFunction) für Prüfungen an; UP_CareerStudioDataStore = true nutzt in einer
+-- veröffentlichten Test-Place den getrennten DataStore "UP_Career_v1_STUDIO".
 -- Keine Robux, keine Zufallspakete: Coins gibt es nur fürs Spielen.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -40,7 +41,7 @@ end
 local INTERACT_RANGE = 14 -- Studs zwischen Spieler und Scout bzw. Ladentheke
 local REQUEST_GAP = 0.3   -- Sekunden zwischen zwei Anfragen eines Spielers
 
-local AUTOSAVE = 60       -- Sekunden zwischen zwei Autosave-Durchläufen (nur geänderte Spielstände)
+local AUTOSAVE = 60       -- Sekunden zwischen zwei Autosave-Durchläufen; jeder Durchlauf erneuert die Sitzungssperre
 
 -- [Player] = { coins, stage, owned = {id=true}, equipped = {slot=id}, matches, goals,
 --              save = "loading"|"ok"|"off"|"error"|"lost", dirty, saving, left, final }
@@ -284,7 +285,18 @@ end
 -- Laden beim Betreten. Was in den Sekunden davor verdient wurde (Matchende), wird zum geladenen Stand addiert.
 local function loadPlayer(plr, d)
 	pending += 1
-	local status, loaded = persist.load(plr.UserId)
+	local status, loaded, token = persist.load(plr.UserId, function()
+		-- wird nur aufgerufen, wenn das Laden länger dauert (fremde Sperre beim Serverwechsel oder Störung)
+		if not d.waitNotified then
+			d.waitNotified = true
+			toast(plr, "Dein Spielstand wird geladen – das dauert gerade etwas länger. Käufe sind gleich wieder möglich.")
+		end
+		return d.left
+	end)
+	if status == "cancelled" then
+		pending -= 1
+		return
+	end
 	if status ~= "ok" then
 		warn("[Career] Laden fehlgeschlagen für " .. plr.UserId .. ": " .. tostring(loaded))
 		setSave(plr, d, "error")
@@ -298,10 +310,11 @@ local function loadPlayer(plr, d)
 	local earned = d.coins > 0 or d.matches > 0 or d.stage > 1
 	d.coins, d.stage, d.owned, d.equipped = loaded.coins, loaded.stage, loaded.owned, loaded.equipped
 	d.matches, d.goals = loaded.matches, loaded.goals
+	d.token = token
 	d.save = "ok"
 	if d.left then
 		-- während des Ladens gegangen: Stand sofort zurückschreiben und Sperre freigeben
-		persist.save(plr.UserId, d, true)
+		persist.save(plr.UserId, d, d.token, true)
 	else
 		sync(plr, true)
 		d.dirty = earned
@@ -316,7 +329,7 @@ local function saveNow(plr, d, release)
 	if d.save ~= "ok" or (d.final and not release) then return end
 	d.saving = true
 	d.dirty = false
-	local status, err = persist.save(plr.UserId, d, release)
+	local status, err = persist.save(plr.UserId, d, d.token, release)
 	d.saving = false
 	if status == "lost" then
 		setSave(plr, d, "lost")
@@ -342,7 +355,8 @@ local function autosaveLoop()
 	while true do
 		task.wait(AUTOSAVE)
 		for plr, d in pairs(data) do
-			if d.save == "ok" and d.dirty and not d.left and not d.saving then
+			-- auch unveränderte Stände speichern: nur so bleibt die Sitzungssperre frisch
+			if d.save == "ok" and not d.left and not d.saving then
 				task.spawn(saveNow, plr, d, false)
 				task.wait(0.5) -- Anfragen verteilen
 			end
@@ -367,7 +381,7 @@ local function testHook()
 		elseif cmd == "flush" then
 			local n = 0
 			for p, d in pairs(data) do
-				if d.save == "ok" and d.dirty then saveNow(p, d, false) n += 1 end
+				if d.save == "ok" and not d.left then saveNow(p, d, false) n += 1 end
 			end
 			return n
 		elseif cmd == "rejoin" and plr and data[plr] then
@@ -415,13 +429,21 @@ function Career.init(cityFolder, L)
 	scoutRoot = buildScout(cityFolder, scoutPos, Vector3.new(L.plaza.X, gy + 3, L.plaza.Z))
 	-- Theke vor dem Fashion District (erste Ladenfront links)
 	shopRoot = buildShop(cityFolder, Vector3.new(L.plaza.X - 56, gy, L.plaza.Z - 42 - 22 + 18))
-	-- Speicher wählen: Studio-Testmodus (Attrappe) > DataStore in veröffentlichten Places > kein Speichern
-	local storeObj
-	if RunService:IsStudio() and workspace:GetAttribute("UP_CareerMemoryStore") == true then
-		memoryStore = CareerStore.memory()
-		storeObj = memoryStore
+	-- Speicher wählen. Live-Server einer veröffentlichten Place: DataStore "UP_Career_v1". Studio nie den Live-Bestand:
+	-- Attrappe (UP_CareerMemoryStore), getrennter Studio-DataStore (UP_CareerStudioDataStore) oder kein Speichern.
+	local storeObj, storeName
+	if RunService:IsStudio() then
+		if workspace:GetAttribute("UP_CareerMemoryStore") == true then
+			memoryStore = CareerStore.memory()
+			storeObj = memoryStore
+		elseif workspace:GetAttribute("UP_CareerStudioDataStore") == true and game.PlaceId ~= 0 then
+			storeName = "UP_Career_v1_STUDIO"
+		end
 	elseif game.PlaceId ~= 0 then
-		local ok, ds = pcall(function() return DataStoreService:GetDataStore("UP_Career_v1") end)
+		storeName = "UP_Career_v1"
+	end
+	if storeName then
+		local ok, ds = pcall(function() return DataStoreService:GetDataStore(storeName) end)
 		if ok then storeObj = ds else warn("[Career] DataStore nicht verfügbar: " .. tostring(ds)) end
 	end
 	if storeObj then
@@ -430,7 +452,7 @@ function Career.init(cityFolder, L)
 		task.spawn(autosaveLoop)
 		if memoryStore then testHook() end
 	end
-	print("[Career] Speicherstand: " .. (memoryStore and "Studio-Attrappe" or storeObj and "DataStore UP_Career_v1" or "aus (nur diese Sitzung)"))
+	print("[Career] Speicherstand: " .. (memoryStore and "Studio-Attrappe" or storeObj and ("DataStore " .. storeName) or "aus (nur diese Sitzung)"))
 	remote.OnServerEvent:Connect(onRequest)
 	Players.PlayerAdded:Connect(onPlayer)
 	for _, p in ipairs(Players:GetPlayers()) do onPlayer(p) end

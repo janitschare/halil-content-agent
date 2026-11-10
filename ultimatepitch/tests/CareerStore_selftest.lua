@@ -1,7 +1,8 @@
 -- Selbsttest für src/CareerStore.lua (in Studio ausführen: Befehlsleiste oder MCP execute_luau, Edit- oder Server-Kontext).
 -- Nutzt die Speicher-Attrappe CareerStore.memory() mit künstlicher Uhr und Warte-Funktion; kein DataStore nötig.
 -- Ergebnis: Textzeilen "PASS"/"FAIL" je Fall und eine Summenzeile.
-local CareerStore = require(game:GetService("ServerScriptService").UltimatePitchServer.CareerStore)
+-- Klon statt Original: Studio hält require-Ergebnisse im Cache, ein Klon lädt immer den aktuellen Quelltext
+local CareerStore = require(game:GetService("ServerScriptService").UltimatePitchServer.CareerStore:Clone())
 
 local ITEMS = {
 	boots_neon = { slot = "boots" }, boots_gold = { slot = "boots" },
@@ -15,47 +16,44 @@ end
 
 local clock = 1000000
 local waits = 0
-local function mk(store, job)
-	return CareerStore.new(store, { jobId = job, items = ITEMS, stages = 3,
+local function mk(store, job, maxLockWait)
+	return CareerStore.new(store, { jobId = job, items = ITEMS, stages = 3, lockWait = 5, maxLockWait = maxLockWait,
 		now = function() return clock end,
 		wait = function(s) waits += 1 clock += s end })
 end
-local function sample()
-	return { coins = 120, stage = 2, owned = { boots_neon = true, armband = true }, equipped = { boots = "boots_neon" }, matches = 3, goals = 4 }
+local function sample(coins)
+	return { coins = coins or 120, stage = 2, owned = { boots_neon = true, armband = true }, equipped = { boots = "boots_neon" }, matches = 3, goals = 4 }
 end
 local K = CareerStore.key(42)
 
--- 1 neuer Spieler: Standardwerte, Sperre gesetzt
+-- 1 neuer Spieler, Speichern, Freigabe, Laden auf anderem Server
 do
 	local m = CareerStore.memory()
 	local a = mk(m, "A")
-	local st, d = a.load(42)
+	local st, d, tok = a.load(42)
 	local rec = m:read(K)
-	check("neuer Spieler laedt Standardwerte", st == "ok" and d.coins == 0 and d.stage == 1, st)
-	check("Laden setzt Sperre", rec and rec.lock and rec.lock.job == "A")
-	-- 2 Speichern behaelt Sperre, Freigeben entfernt sie, Werte kommen beim naechsten Laden zurueck
-	local s1 = a.save(42, sample(), false)
+	check("neuer Spieler laedt Standardwerte", st == "ok" and d.coins == 0 and d.stage == 1 and type(tok) == "string", st)
+	check("Laden setzt Sperre mit Ladekennung", rec and rec.lock and rec.lock.job == "A" and rec.lock.sid == tok)
+	local s1 = a.save(42, sample(), tok, false)
 	rec = m:read(K)
-	check("Zwischenspeichern ok, Sperre bleibt", s1 == "ok" and rec.coins == 120 and rec.lock.job == "A")
-	local s2 = a.save(42, sample(), true)
+	check("Zwischenspeichern ok, Sperre bleibt", s1 == "ok" and rec.coins == 120 and rec.lock.sid == tok)
+	local s2 = a.save(42, sample(), tok, true)
 	rec = m:read(K)
 	check("Abschluss gibt Sperre frei", s2 == "ok" and rec.lock == nil)
-	local b = mk(m, "B")
 	waits = 0
-	local st2, d2 = b.load(42)
+	local st2, d2 = mk(m, "B").load(42)
 	check("anderer Server laedt freigegebenen Stand sofort", st2 == "ok" and waits == 0 and d2.coins == 120 and d2.stage == 2
 		and d2.owned.armband and d2.equipped.boots == "boots_neon" and d2.goals == 4, waits)
 end
 
--- 3 beschaedigte/manipulierte Daten werden bereinigt
+-- 2 beschaedigte/manipulierte Daten werden bereinigt
 do
 	local m = CareerStore.memory()
 	m:write(K, { schema = 1, coins = -5, stage = 99, owned = { "boots_neon", "hack", 5 },
 		equipped = { boots = "boots_gold", armband = "armband", number = "boots_neon" }, matches = "x", goals = 1.7 })
 	local st, d = mk(m, "A").load(42)
-	local n = 0
+	local n, e = 0, 0
 	for _ in pairs(d.owned) do n += 1 end
-	local e = 0
 	for _ in pairs(d.equipped) do e += 1 end
 	check("Bereinigung: Coins >= 0, Stufe begrenzt, nur bekannte Artikel", st == "ok" and d.coins == 0 and d.stage == 3 and n == 1 and d.owned.boots_neon)
 	check("Bereinigung: nur besessene Ausruestung im richtigen Platz", e == 0, e)
@@ -65,34 +63,75 @@ do
 	check("Bereinigung: Coin-Obergrenze", d2.coins == CareerStore.MAX_COINS)
 end
 
--- 4 frische fremde Sperre: warten, dann Uebernahme; alter Server darf danach nicht mehr schreiben
+-- 3 frische fremde Sperre wird nie uebernommen (Codex P1): B wartet und gibt mit "error" auf, A behaelt den Stand
 do
 	local m = CareerStore.memory()
 	local a = mk(m, "A")
-	a.load(42)
-	a.save(42, sample(), false)
-	local b = mk(m, "B")
+	local _, _, tokA = a.load(42)
+	a.save(42, sample(150), tokA, false)
 	waits = 0
-	local st, d = b.load(42)
+	local st = mk(m, "B", 60).load(42)
 	local rec = m:read(K)
-	check("frische Sperre: erst warten (5x), dann uebernehmen", st == "ok" and waits == 5 and rec.lock.job == "B" and d.coins == 120, waits)
-	local late = sample()
-	late.coins = 999
-	local s = a.save(42, late, true)
+	check("frische Sperre: B wartet und bricht ab, keine Uebernahme", st == "error" and waits >= 10 and rec.lock.sid == tokA, st .. "/" .. waits)
+	local s = a.save(42, sample(160), tokA, true)
 	rec = m:read(K)
-	check("alter Server: Speichern abgelehnt (lost), Stand unveraendert", s == "lost" and rec.coins == 120 and rec.lock.job == "B", s)
+	check("A speichert danach weiter und gibt frei", s == "ok" and rec.coins == 160 and rec.lock == nil, s)
 end
 
--- 5 verwaiste Sperre (aelter als LOCK_TIMEOUT): sofort uebernehmen
+-- 4 Sperre wird durch Autosave erneuert: 350 s nach dem Laden, 100 s nach der letzten Erneuerung noch geschuetzt
 do
 	local m = CareerStore.memory()
-	m:write(K, { schema = 1, coins = 50, lock = { job = "Z", t = clock - CareerStore.LOCK_TIMEOUT - 10 } })
-	waits = 0
-	local st, d = mk(m, "A").load(42)
-	check("verwaiste Sperre: ohne Warten uebernommen", st == "ok" and waits == 0 and d.coins == 50, waits)
+	local a = mk(m, "A")
+	local _, _, tokA = a.load(42)
+	clock += 250
+	a.save(42, sample(), tokA, false)
+	clock += 100
+	local st = mk(m, "B", 20).load(42)
+	check("erneuerte Sperre bleibt geschuetzt", st == "error", st)
 end
 
--- 6 voruebergehende Fehler werden wiederholt; dauerhafte Fehler liefern "error" ohne Schreiben
+-- 5 Codex-Sequenz: A laedt, A haengt (keine Erneuerung), B uebernimmt die abgelaufene Sperre, speichert 200 und gibt frei;
+--   danach darf A seinen alten Stand (100) nicht mehr schreiben
+do
+	local m = CareerStore.memory()
+	local a = mk(m, "A")
+	local _, _, tokA = a.load(42)
+	clock += CareerStore.LOCK_TIMEOUT + 10
+	waits = 0
+	local b = mk(m, "B")
+	local stB, _, tokB = b.load(42)
+	check("abgelaufene Sperre: ohne Warten uebernommen", stB == "ok" and waits == 0, waits)
+	b.save(42, sample(200), tokB, true)
+	local sA = a.save(42, sample(100), tokA, true)
+	local rec = m:read(K)
+	check("alter Server nach fremder Freigabe: lost, 200 bleibt", sA == "lost" and rec.coins == 200, sA)
+	local sA2 = a.save(42, sample(100), tokA, false)
+	rec = m:read(K)
+	check("alter Server Zwischenspeichern: lost, keine neue Sperre", sA2 == "lost" and rec.coins == 200 and rec.lock == nil, sA2)
+end
+
+-- 6 Wiederbeitritt auf demselben Server: alte Ladekennung darf nicht mehr schreiben
+do
+	local m = CareerStore.memory()
+	local a = mk(m, "A")
+	local _, _, tok1 = a.load(42)
+	a.save(42, sample(10), tok1, true)
+	local _, _, tok2 = a.load(42)
+	local s = a.save(42, sample(999), tok1, false)
+	local rec = m:read(K)
+	check("gleicher Server, alte Kennung: lost", s == "lost" and rec.coins == 10 and rec.lock.sid == tok2, s)
+end
+
+-- 7 Warten abbrechen, wenn der Spieler geht
+do
+	local m = CareerStore.memory()
+	local _, _, tokA = mk(m, "A").load(42)
+	local st = mk(m, "B").load(42, function() return true end)
+	local rec = m:read(K)
+	check("Abbruch beim Warten: cancelled, Sperre unveraendert", st == "cancelled" and rec.lock.sid == tokA, st)
+end
+
+-- 8 voruebergehende Fehler werden wiederholt; dauerhafte Fehler liefern "error" ohne Schreiben
 do
 	local m = CareerStore.memory()
 	m:write(K, { schema = 1, coins = 70 })
@@ -107,13 +146,13 @@ do
 	check("dauerhafter Fehler: error, Stand unangetastet", st2 == "error" and rec.coins == 70 and rec.lock == nil, st2)
 	local m3 = CareerStore.memory()
 	local a = mk(m3, "A")
-	a.load(42)
+	local _, _, tok = a.load(42)
 	m3.failNext = 10
-	local s = a.save(42, sample(), true)
+	local s = a.save(42, sample(), tok, true)
 	check("Speichern bei dauerhaftem Fehler: error", s == "error", s)
 end
 
--- 7 Stand aus neuerer Spielversion wird nicht angefasst
+-- 9 Stand aus neuerer Spielversion wird nicht angefasst
 do
 	local m = CareerStore.memory()
 	m:write(K, { schema = 2, coins = 300 })

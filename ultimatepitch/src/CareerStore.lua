@@ -1,10 +1,11 @@
 -- UltimatePitch · dauerhafter Karriere-Speicherstand (ModuleScript unter UltimatePitchServer, nur Server)
 -- Ein Datensatz je Spieler (Schlüssel "u_<UserId>") mit Coins, Stufe, Besitz, Ausrüstung und Statistik.
--- Alle Zugriffe laufen über UpdateAsync mit einer Sitzungssperre (lock = { job = JobId, t = os.time() }):
---   * Laden sperrt den Datensatz für diesen Server. Hält ein anderer Server noch eine frische Sperre (er speichert
---     z. B. gerade beim Serverwechsel), wird kurz gewartet; erst nach mehreren Versuchen oder bei einer verwaisten
---     Sperre (älter als LOCK_TIMEOUT, Server abgestürzt) übernimmt dieser Server.
---   * Speichern schreibt nur, solange die Sperre diesem Server gehört; sonst "lost" (kein Überschreiben fremder Stände).
+-- Alle Zugriffe laufen über UpdateAsync mit einer Sitzungssperre (lock = { job = JobId, sid = Ladekennung, t = os.time() }):
+--   * Laden sperrt den Datensatz für genau diesen Ladevorgang. Ist eine Sperre noch frisch (ein anderer Server spielt
+--     oder speichert gerade beim Serverwechsel), wird gewartet, bis sie freigegeben wird oder abläuft – nie übernommen.
+--   * Der haltende Server erneuert seine Sperre mit jedem Autosave (Aufrufer: regelmäßig, auch ohne Änderungen);
+--     eine Sperre älter als LOCK_TIMEOUT stammt von einem abgestürzten Server und darf übernommen werden.
+--   * Speichern schreibt nur, solange genau die eigene Sperre im Datensatz steht; sonst "lost".
 --   * Verlassen speichert ein letztes Mal und gibt die Sperre frei.
 -- Schlägt das Laden fehl, liefert load "error": Der Aufrufer speichert dann für diesen Spieler nichts, damit ein
 -- vorhandener Spielstand nicht durch einen leeren überschrieben wird.
@@ -57,29 +58,35 @@ function CareerStore.serialize(d)
 		matches = d.matches, goals = d.goals }
 end
 
--- store: DataStore oder CareerStore.memory(); opts = { jobId, items, stages, now?, wait?, retries?, lockWaits?, lockWait? }
+-- store: DataStore oder CareerStore.memory()
+-- opts = { jobId, items, stages, now?, wait?, newToken?, retries?, lockWait?, maxLockWait? }
 function CareerStore.new(store, opts)
 	local self = {}
 	local jobId = opts.jobId
 	local now = opts.now or os.time
 	local wait = opts.wait or task.wait
-	local retries = opts.retries or 4      -- Fehlversuche (Netz/Budget) bis "error"
-	local lockWaits = opts.lockWaits or 5  -- Warteschleifen auf eine fremde Sperre bis zur Übernahme
-	local lockWait = opts.lockWait or 3
+	local newToken = opts.newToken or function() return HttpService:GenerateGUID(false) end
+	local retries = opts.retries or 4 -- Fehlversuche (Netz/Budget) bis "error"
+	local lockWait = opts.lockWait or 5 -- Sekunden zwischen zwei Versuchen bei fremder Sperre
+	-- so lange höchstens auf eine fremde, frische Sperre warten (sie läuft spätestens nach LOCK_TIMEOUT ab, weil
+	-- der haltende Server sie nur durch regelmäßiges Speichern erneuert); danach "error" statt Übernahme
+	local maxLockWait = opts.maxLockWait or (CareerStore.LOCK_TIMEOUT + 30)
 
-	local function foreignLock(old, includeStale)
+	-- Sperre eines anderen Ladevorgangs (anderer Server oder früherer Beitritt), die noch nicht abgelaufen ist
+	local function freshLock(old)
 		local lock = type(old) == "table" and old.lock
-		if type(lock) ~= "table" or lock.job == jobId then return false end
-		if includeStale then return true end
-		return type(lock.t) == "number" and now() - lock.t < CareerStore.LOCK_TIMEOUT
+		return type(lock) == "table" and type(lock.t) == "number" and now() - lock.t < CareerStore.LOCK_TIMEOUT
 	end
 
-	-- Lädt und sperrt. Rückgabe: "ok", data | "error", Meldung
-	function self.load(userId)
-		local errors, waits = 0, 0
+	-- Lädt und sperrt. Jeder Ladevorgang erhält eine eigene Kennung (token); nur mit ihr darf später gespeichert
+	-- werden. Eine frische Sperre wird nie übernommen, nur eine freigegebene oder abgelaufene.
+	-- cancelled(): optional, bricht das Warten ab (Spieler hat das Spiel verlassen).
+	-- Rückgabe: "ok", data, token | "error", Meldung | "cancelled"
+	function self.load(userId, cancelled)
+		local errors, waited = 0, 0
+		local token = newToken()
 		while true do
 			local blocked, newer, raw = false, false, nil
-			local steal = waits >= lockWaits
 			local ok, err = pcall(function()
 				store:UpdateAsync(key(userId), function(old)
 					blocked, newer, raw = false, false, old
@@ -87,19 +94,21 @@ function CareerStore.new(store, opts)
 						newer = true -- von einer neueren Spielversion geschrieben: nicht anfassen
 						return nil
 					end
-					if not steal and foreignLock(old, false) then
+					if freshLock(old) then
 						blocked = true
 						return nil
 					end
 					local rec = type(old) == "table" and old or {}
-					rec.lock = { job = jobId, t = now() }
+					rec.lock = { job = jobId, sid = token, t = now() }
 					return rec, { userId }
 				end)
 			end)
 			if ok and newer then return "error", "Spielstand stammt aus einer neueren Version" end
-			if ok and not blocked then return "ok", CareerStore.sanitize(raw, opts.items, opts.stages) end
+			if ok and not blocked then return "ok", CareerStore.sanitize(raw, opts.items, opts.stages), token end
+			if cancelled and cancelled() then return "cancelled" end
 			if ok then
-				waits += 1
+				if waited >= maxLockWait then return "error", "Spielstand wird noch von einem anderen Server gehalten" end
+				waited += lockWait
 				wait(lockWait)
 			else
 				errors += 1
@@ -109,20 +118,23 @@ function CareerStore.new(store, opts)
 		end
 	end
 
-	-- Speichert (release = Sperre freigeben). Rückgabe: "ok" | "lost" (anderer Server hält den Stand) | "error", Meldung
-	function self.save(userId, data, release)
+	-- Speichert; schreibt nur, wenn der Datensatz noch genau mit der Sperre dieses Ladevorgangs (token) belegt ist.
+	-- Eine fehlende oder fremde Sperre bedeutet: ein anderer Server hat übernommen (und ggf. schon freigegeben).
+	-- release = Sperre freigeben (letztes Speichern). Rückgabe: "ok" | "lost" | "error", Meldung
+	function self.save(userId, data, token, release)
 		local errors = 0
 		while true do
 			local lost = false
 			local ok, err = pcall(function()
 				store:UpdateAsync(key(userId), function(old)
 					lost = false
-					if foreignLock(old, true) then
+					local lock = type(old) == "table" and old.lock
+					if type(lock) ~= "table" or lock.sid ~= token or lock.job ~= jobId then
 						lost = true
 						return nil
 					end
 					local rec = CareerStore.serialize(data)
-					if not release then rec.lock = { job = jobId, t = now() } end
+					if not release then rec.lock = { job = jobId, sid = token, t = now() } end
 					return rec, { userId }
 				end)
 			end)
