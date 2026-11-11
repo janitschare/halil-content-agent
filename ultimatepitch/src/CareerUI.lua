@@ -148,9 +148,47 @@ function CareerUI.start(gui, remote)
 	end
 
 	------------------------------------------------------------ Scout-Gespräch
-	local scout = panel("TALENT-SCOUT", ACCENT, 440, 230)
-	local scoutText = make("TextLabel", { Position = UDim2.fromOffset(18, 48), Size = UDim2.new(1, -36, 1, -116), TextSize = 16, TextWrapped = true,
+	local scout = panel("TALENT-SCOUT", ACCENT, 460, 340)
+	local scoutText = make("TextLabel", { Position = UDim2.fromOffset(18, 46), Size = UDim2.new(1, -36, 0.26, 0), TextSize = 16, TextWrapped = true,
 		Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, Text = "" }, scout)
+	-- Talent-Karte (Art Direction, Referenz 3): vier Werte aus Matches und Toren dieser Karriere, reine Anzeige
+	local card = corner(make("Frame", { Position = UDim2.new(0, 18, 0.26, 52), Size = UDim2.new(1, -36, 0.34, 0),
+		BackgroundColor3 = Color3.fromRGB(22, 28, 44) }, scout), 8)
+	make("TextLabel", { Position = UDim2.fromScale(0.04, 0.04), Size = UDim2.fromScale(0.36, 0.2), TextScaled = true,
+		Font = Enum.Font.GothamBlack, TextColor3 = GOLD, TextXAlignment = Enum.TextXAlignment.Left, Text = "TALENT" }, card)
+	local stars = {}
+	for i = 1, 5 do
+		-- Sterne als gedrehte Quadrate (Gotham hat kein ★-Zeichen)
+		stars[i] = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.42 + (i - 1) * 0.08, 0, 0.14, 0),
+			Size = UDim2.fromOffset(13, 13), Rotation = 45, BackgroundColor3 = GOLD }, card)
+	end
+	local bars = {}
+	for i, name in ipairs({ "Technik", "Tempo", "Spielintelligenz", "Potenzial" }) do
+		local y = 0.28 + (i - 1) * 0.18
+		make("TextLabel", { Position = UDim2.fromScale(0.04, y), Size = UDim2.fromScale(0.36, 0.15), TextScaled = true, Font = Enum.Font.GothamBold,
+			TextXAlignment = Enum.TextXAlignment.Left, Text = name }, card)
+		local track = corner(make("Frame", { Position = UDim2.fromScale(0.42, y + 0.035), Size = UDim2.fromScale(0.42, 0.08),
+			BackgroundColor3 = Color3.fromRGB(50, 56, 76) }, card), 4)
+		local fill = corner(make("Frame", { Size = UDim2.fromScale(0.5, 1), BackgroundColor3 = ACCENT }, track), 4)
+		local value = make("TextLabel", { Position = UDim2.fromScale(0.86, y), Size = UDim2.fromScale(0.1, 0.15), TextScaled = true,
+			Font = Enum.Font.GothamBlack, Text = "" }, card)
+		bars[i] = { fill = fill, value = value }
+	end
+	local function refreshCard()
+		local m, g = player:GetAttribute("CareerMatches") or 0, player:GetAttribute("CareerGoals") or 0
+		local vals = { math.clamp(52 + g * 4, 40, 99), math.clamp(58 + m * 2, 40, 99), math.clamp(50 + m * 3 + g, 40, 99), 88 }
+		local sum = 0
+		for i, v in ipairs(vals) do
+			bars[i].fill.Size = UDim2.fromScale(v / 99, 1)
+			bars[i].fill.BackgroundColor3 = i == 4 and GOLD or ACCENT
+			bars[i].value.Text = tostring(v)
+			sum += v
+		end
+		local n = math.clamp(math.floor(sum / #vals / 20 + 0.5), 1, 5)
+		for i, s in ipairs(stars) do
+			s.BackgroundColor3 = i <= n and GOLD or Color3.fromRGB(60, 66, 84)
+		end
+	end
 	make("UITextSizeConstraint", { MaxTextSize = 16, MinTextSize = 11 }, scoutText)
 	scoutText.TextScaled = true
 	local accept = button(scout, "UNTERSCHREIBEN", GOLD, { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 18, 1, -16),
@@ -233,6 +271,33 @@ function CareerUI.start(gui, remote)
 		end
 	end)
 
+	-- Markierung über dem Scout (nur lokal): „!“ in Gold, solange sein Angebot wartet, „?“ vor dem ersten Match
+	task.spawn(function()
+		local city = workspace:WaitForChild("UltimatePitch", 30)
+		city = city and city:WaitForChild("City", 30)
+		local npc = city and city:WaitForChild("TalentScout", 30)
+		local head = npc and npc:WaitForChild("Head", 10)
+		if not head then return end
+		local bb = make("BillboardGui", { Name = "UP_ScoutMarker", Size = UDim2.fromOffset(46, 46), StudsOffset = Vector3.new(0, 3.2, 0),
+			AlwaysOnTop = true, MaxDistance = 120, LightInfluence = 0, Adornee = head, ResetOnSpawn = false }, gui.Parent)
+		local dot = corner(make("TextLabel", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 0, BackgroundColor3 = GOLD, Text = "!",
+			TextScaled = true, Font = Enum.Font.GothamBlack, TextColor3 = PANEL }, bb), 23)
+		make("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2 }, dot)
+		local function refreshMarker()
+			local st = player:GetAttribute("CareerStageIndex") or 1
+			bb.Enabled = st < 3
+			dot.Text = st == 2 and "!" or "?"
+			dot.BackgroundColor3 = st == 2 and GOLD or Color3.fromRGB(150, 156, 172)
+		end
+		player:GetAttributeChangedSignal("CareerStageIndex"):Connect(refreshMarker)
+		refreshMarker()
+		-- sanftes Wippen, solange die Markierung sichtbar ist
+		while bb.Parent do
+			if bb.Enabled then bb.StudsOffset = Vector3.new(0, 3.2 + math.sin(os.clock() * 3) * 0.25, 0) end
+			task.wait(1 / 20)
+		end
+	end)
+
 	remote.OnClientEvent:Connect(function(kind, arg)
 		if kind == "Toast" and type(arg) == "string" then
 			toast(arg)
@@ -241,6 +306,7 @@ function CareerUI.start(gui, remote)
 			scoutText.Text = "„Ich habe dein Spiel auf dem Street Court gesehen. So ein Talent sieht man nicht oft!\n\n"
 				.. "Unterschreib bei unserem Talentprogramm – als Startgeld gibt es " .. tostring(arg) .. " Pitch Coins.“"
 			accept.Text = "UNTERSCHREIBEN  +" .. tostring(arg)
+			refreshCard()
 			scout.Visible = true
 		elseif kind == "OpenShop" and type(arg) == "table" then
 			catalog = arg

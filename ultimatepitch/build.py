@@ -1,6 +1,6 @@
 """Baut aus src/ die Place-Datei (.rbxlx) und den Command-Bar-Installer.
 
-Server-Script mit Kind-Modulen Dome, City, Career und CareerStore, Client-LocalScript mit Kind-Modulen AuroraFX, Matchday und CareerUI.
+Server-Script mit Kind-Modulen Dome, City, Career, CareerStore und CityLook, Client-LocalScript mit Kind-Modulen AuroraFX, Matchday, CareerUI und CityFX.
 build.ps1 ist das PowerShell-Gegenstück und erzeugt dieselben Dateien.
 """
 from pathlib import Path
@@ -23,6 +23,8 @@ aurora = src("AuroraFX.lua")
 matchday = src("Matchday.lua")
 career = src("Career.lua")
 career_store = src("CareerStore.lua")
+city_look = src("CityLook.lua")
+city_fx = src("CityFX.lua")
 career_ui = src("CareerUI.lua")
 
 
@@ -38,11 +40,11 @@ rbxlx = f'''<roblox version="4">
 <Item class="Workspace" referent="RBX0"><Properties><string name="Name">Workspace</string></Properties></Item>
 <Item class="Lighting" referent="RBX8"><Properties><string name="Name">Lighting</string><token name="LightingStyle">0</token><bool name="PrioritizeLightingQuality">false</bool></Properties></Item>
 <Item class="ServerScriptService" referent="RBX1"><Properties><string name="Name">ServerScriptService</string></Properties>
-{item("Script", "RBX2", "UltimatePitchServer", server, item("ModuleScript", "RBX6", "Dome", dome) + item("ModuleScript", "RBX10", "City", city) + item("ModuleScript", "RBX11", "Career", career) + item("ModuleScript", "RBX13", "CareerStore", career_store))}
+{item("Script", "RBX2", "UltimatePitchServer", server, item("ModuleScript", "RBX6", "Dome", dome) + item("ModuleScript", "RBX10", "City", city) + item("ModuleScript", "RBX11", "Career", career) + item("ModuleScript", "RBX13", "CareerStore", career_store) + item("ModuleScript", "RBX14", "CityLook", city_look))}
 </Item>
 <Item class="StarterPlayer" referent="RBX3"><Properties><string name="Name">StarterPlayer</string></Properties>
 <Item class="StarterPlayerScripts" referent="RBX4"><Properties><string name="Name">StarterPlayerScripts</string></Properties>
-{item("LocalScript", "RBX5", "UltimatePitchClient", client, item("ModuleScript", "RBX7", "AuroraFX", aurora) + item("ModuleScript", "RBX9", "Matchday", matchday) + item("ModuleScript", "RBX12", "CareerUI", career_ui))}
+{item("LocalScript", "RBX5", "UltimatePitchClient", client, item("ModuleScript", "RBX7", "AuroraFX", aurora) + item("ModuleScript", "RBX9", "Matchday", matchday) + item("ModuleScript", "RBX12", "CareerUI", career_ui) + item("ModuleScript", "RBX15", "CityFX", city_fx))}
 </Item></Item>
 </roblox>
 '''
@@ -82,10 +84,12 @@ local sd = Instance.new("ModuleScript") sd.Name = "Dome" sd.Source = [==[{dome}]
 local sc = Instance.new("ModuleScript") sc.Name = "City" sc.Source = [==[{city}]==] sc.Parent = s
 local sk = Instance.new("ModuleScript") sk.Name = "Career" sk.Source = [==[{career}]==] sk.Parent = s
 local sp = Instance.new("ModuleScript") sp.Name = "CareerStore" sp.Source = [==[{career_store}]==] sp.Parent = s
+local sl = Instance.new("ModuleScript") sl.Name = "CityLook" sl.Source = [==[{city_look}]==] sl.Parent = s
 local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[{client}]==]
 local ca = Instance.new("ModuleScript") ca.Name = "AuroraFX" ca.Source = [==[{aurora}]==] ca.Parent = c
 local cm = Instance.new("ModuleScript") cm.Name = "Matchday" cm.Source = [==[{matchday}]==] cm.Parent = c
 local ck = Instance.new("ModuleScript") ck.Name = "CareerUI" ck.Source = [==[{career_ui}]==] ck.Parent = c
+local cf = Instance.new("ModuleScript") cf.Name = "CityFX" cf.Source = [==[{city_fx}]==] cf.Parent = c
 s.Parent = SSS
 c.Parent = SPS
 game:GetService("ChangeHistoryService"):SetWaypoint("UltimatePitch v{V}")

@@ -76,6 +76,8 @@ local function sync(plr, clean)
 	plr:SetAttribute("CareerStageIndex", d.stage)
 	plr:SetAttribute("CareerOwned", list(d.owned))
 	plr:SetAttribute("CareerEquipped", list(d.equipped))
+	plr:SetAttribute("CareerMatches", d.matches) -- für die Talent-Karte des Scouts (M4)
+	plr:SetAttribute("CareerGoals", d.goals)
 	local ls = plr:FindFirstChild("leaderstats")
 	if ls then
 		ls.Coins.Value = d.coins

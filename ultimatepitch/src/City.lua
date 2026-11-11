@@ -7,6 +7,8 @@ local City = {}
 local ASPHALT = Color3.fromRGB(46, 50, 58)
 local PAVING = Color3.fromRGB(150, 154, 164)
 local PAVING_DARK = Color3.fromRGB(96, 100, 112)
+local PLAZA = Color3.fromRGB(62, 66, 86)      -- M4: dunkler Glanzboden (nasser Look der Referenz)
+local PLAZA_BAND = Color3.fromRGB(44, 48, 66)
 local STEEL = Color3.fromRGB(70, 78, 96)
 local CYAN = Color3.fromRGB(40, 210, 255)
 local GOLD = Color3.fromRGB(255, 200, 60)
@@ -55,15 +57,36 @@ local function sign(p, face, text, color, bg)
 	return l
 end
 
-local function tree(pos, parent)
-	part({ Name = "Trunk", Size = Vector3.new(1.6, 8, 1.6), Position = pos + Vector3.new(0, 4, 0),
-		Material = Enum.Material.Wood, Color = Color3.fromRGB(92, 64, 44) }, parent)
-	deco({ Name = "Leaves", Shape = Enum.PartType.Ball, Size = Vector3.new(10, 10, 10), Position = pos + Vector3.new(0, 11, 0),
-		Material = Enum.Material.Grass, Color = Color3.fromRGB(52, 128, 62) }, parent)
-	deco({ Name = "Leaves", Shape = Enum.PartType.Ball, Size = Vector3.new(7, 7, 7), Position = pos + Vector3.new(2.5, 14, 1),
-		Material = Enum.Material.Grass, Color = Color3.fromRGB(64, 146, 70) }, parent)
+-- Palme (M4, Art Direction): leicht gebogener Stamm aus vier Abschnitten, sieben Wedel, Kokosnüsse, Pflanzkübel
+local function palm(pos, lean, parent)
+	local up = Vector3.new(0, 1, 0)
+	local p = pos + Vector3.new(0, 1, 0)
+	for i = 1, 4 do
+		local dir = (up + lean * (i * 0.07)).Unit
+		local nxt = p + dir * 3.6
+		part({ Name = "PalmTrunk", Shape = Enum.PartType.Cylinder, Size = Vector3.new(3.8, 1.5 - i * 0.12, 1.5 - i * 0.12),
+			CFrame = CFrame.lookAt((p + nxt) / 2, nxt) * CFrame.Angles(0, math.pi / 2, 0), Material = Enum.Material.Wood,
+			Color = i % 2 == 0 and Color3.fromRGB(110, 80, 52) or Color3.fromRGB(96, 68, 44) }, parent)
+		p = nxt
+	end
+	for i = 0, 6 do
+		local yaw = i / 7 * math.pi * 2
+		deco({ Name = "PalmFrond", Size = Vector3.new(1.9, 0.25, 8.6),
+			CFrame = CFrame.new(p) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(math.rad(-24 - (i % 2) * 10), 0, 0) * CFrame.new(0, 0, -4.1),
+			Material = Enum.Material.SmoothPlastic, Color = i % 2 == 0 and Color3.fromRGB(46, 140, 70) or Color3.fromRGB(36, 116, 58) }, parent)
+	end
+	for i = 0, 2 do
+		local a = i / 3 * math.pi * 2
+		deco({ Name = "Coconut", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.9, Position = p + Vector3.new(math.cos(a) * 0.7, -0.6, math.sin(a) * 0.7),
+			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(80, 56, 30) }, parent)
+	end
 	part({ Name = "Planter", Size = Vector3.new(5, 1, 5), Position = pos + Vector3.new(0, 0.5, 0),
-		Material = Enum.Material.Concrete, Color = PAVING_DARK }, parent)
+		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(28, 30, 42) }, parent)
+	-- goldene Leuchtkante am Kübelrand (nur der Rand, nicht die ganze Fläche)
+	for _, e in ipairs({ { 0, 2.45, 5.2, 0.3 }, { 0, -2.45, 5.2, 0.3 }, { 2.45, 0, 0.3, 4.6 }, { -2.45, 0, 0.3, 4.6 } }) do
+		deco({ Name = "PlanterGlow", Size = Vector3.new(e[3], 0.12, e[4]), Position = pos + Vector3.new(e[1], 1.02, e[2]), Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 196, 64) }, parent)
+	end
 end
 
 local function lamp(pos, parent)
@@ -98,8 +121,8 @@ local function joinPad(name, pos, color, title, subtitle, parent)
 		Material = Enum.Material.Metal, Color = Color3.fromRGB(16, 20, 30) }, parent)
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "PadLabel"
-	bb.Size = UDim2.fromOffset(280, 78)
-	bb.StudsOffset = Vector3.new(0, 8, 0)
+	bb.Size = UDim2.fromScale(13, 3.6) -- in Studs: wird mit der Entfernung kleiner und verdeckt die Dome-Fassade nicht
+	bb.StudsOffset = Vector3.new(0, 5, 0) -- tief genug, damit es die Videowand der Dome-Fassade nicht verdeckt
 	bb.MaxDistance = 160
 	bb.LightInfluence = 0
 	bb.Parent = pad
@@ -143,18 +166,16 @@ function City.build(parent, L)
 	part({ Name = "DistrictGround", Size = Vector3.new(340, 1, 226), Position = G(40, -0.55, -241),
 		Material = Enum.Material.Asphalt, Color = ASPHALT }, city)
 	part({ Name = "Plaza", Size = Vector3.new(110, 0.2, 84), Position = G(px, 0.02, pz),
-		Material = Enum.Material.Slate, Color = PAVING }, city)
+		Material = Enum.Material.SmoothPlastic, Color = PLAZA, Reflectance = 0.12 }, city)
 	for i = -2, 2 do
 		deco({ Name = "PlazaBand", Size = Vector3.new(110, 0.05, 1.2), Position = G(px, 0.14, pz + i * 16),
-			Material = Enum.Material.Slate, Color = PAVING_DARK }, city)
+			Material = Enum.Material.SmoothPlastic, Color = PLAZA_BAND, Reflectance = 0.1 }, city)
 	end
-	-- Mittelpunkt: Emblem-Scheibe mit Leuchtring
+	-- Mittelpunkt: Emblem-Scheibe mit Leuchtring (darauf steht das UP-Monument aus CityLook)
 	deco({ Name = "EmblemRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 30, 30),
 		CFrame = CFrame.new(G(px, 0.16, pz)) * CFrame.Angles(0, 0, math.pi / 2), Material = Enum.Material.Neon, Color = CYAN }, city)
 	local emblem = part({ Name = "Emblem", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 27, 27),
 		CFrame = CFrame.new(G(px, 0.2, pz)) * CFrame.Angles(0, 0, math.pi / 2), Material = Enum.Material.Slate, Color = Color3.fromRGB(18, 24, 40) }, city)
-	sign(part({ Name = "EmblemText", Size = Vector3.new(16, 0.1, 9), Position = G(px, 0.4, pz), Transparency = 1,
-		CanCollide = false, CanQuery = false, CanTouch = false }, city), Enum.NormalId.Top, "ULTIMATE CITY", CYAN).BackgroundTransparency = 1
 	emblem.CastShadow = false
 
 	-- Spawn auf der Plaza (einziger Standard-Spawn der Welt)
@@ -170,10 +191,10 @@ function City.build(parent, L)
 	spawn.TopSurface = Enum.SurfaceType.Smooth
 	spawn.Parent = city
 
-	-- Bäume, Laternen, Bänke rund um die Plaza
+	-- Palmen, Laternen, Bänke rund um die Plaza
 	for _, sx in ipairs({ -1, 1 }) do
 		for i = 0, 2 do
-			tree(G(px + sx * 50, 0, pz - 30 + i * 30), city)
+			palm(G(px + sx * 50, 0, pz - 30 + i * 30), Vector3.new(-sx, 0, (i - 1) * 0.6), city)
 			lamp(G(px + sx * 40, 0, pz - 36 + i * 36), city)
 		end
 		bench(G(px + sx * 30, 0, pz - 18), sx * math.pi / 2, city)
@@ -183,14 +204,15 @@ function City.build(parent, L)
 	-- Stadionzugang: Weg von der Plaza, Torbogen mit Schild, Beitritts-Pad davor
 	local sp = L.stadiumPad
 	part({ Name = "StadiumWalk", Size = Vector3.new(26, 0.2, math.abs(sp.Z - 14 - (pz + 42)) + 30), Position = G(sp.X, 0.03, (sp.Z + 14 + pz + 42) / 2),
-		Material = Enum.Material.Slate, Color = PAVING }, city)
+		Material = Enum.Material.SmoothPlastic, Color = PLAZA, Reflectance = 0.12 }, city)
 	for _, sx in ipairs({ -1, 1 }) do
-		part({ Name = "GatePylon", Size = Vector3.new(4, 26, 4), Position = G(sp.X + sx * 15, 13, sp.Z + 12),
+		part({ Name = "GatePylon", Size = Vector3.new(4, 16, 4), Position = G(sp.X + sx * 15, 8, sp.Z + 12),
 			Material = Enum.Material.Metal, Color = Color3.fromRGB(20, 24, 36) }, city)
-		deco({ Name = "GateLED", Size = Vector3.new(0.4, 24, 0.4), Position = G(sp.X + sx * 15, 13, sp.Z + 9.8),
+		deco({ Name = "GateLED", Size = Vector3.new(0.4, 14, 0.4), Position = G(sp.X + sx * 15, 8, sp.Z + 9.8),
 			Material = Enum.Material.Neon, Color = CYAN }, city)
 	end
-	local header = part({ Name = "GateHeader", Size = Vector3.new(38, 7, 3), Position = G(sp.X, 24, sp.Z + 12),
+	-- niedriges Tor (M4): die Videowand der Dome-Fassade bleibt von der Plaza aus frei sichtbar
+	local header = part({ Name = "GateHeader", Size = Vector3.new(38, 4, 3), Position = G(sp.X, 14, sp.Z + 12),
 		Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 14, 24) }, city)
 	sign(header, Enum.NormalId.Front, "SPECTRA DOME", CYAN)
 	local pads = {}
@@ -252,25 +274,29 @@ function City.build(parent, L)
 	sign(board, Enum.NormalId.Back, "STREET COURT  ·  3 v 3", GOLD)
 	pads.StreetCourt = joinPad("PadStreetCourt", L.courtPad, GOLD, "STREET COURT", "3 gegen 3  ·  Pad betreten", city)
 	part({ Name = "CourtWalk", Size = Vector3.new(math.abs(L.courtPad.X - (px + 55)) + 12, 0.2, 14), Position = G((L.courtPad.X + px + 55) / 2, 0.03, L.courtPad.Z),
-		Material = Enum.Material.Slate, Color = PAVING }, city)
+		Material = Enum.Material.SmoothPlastic, Color = PLAZA, Reflectance = 0.12 }, city)
 
-	-- Ladenfronten: Fashion District ist seit M3 geöffnet (Theke und Shop im Career-Modul), die anderen folgen
+	-- Ladenfronten: Fashion District ist seit M3 geöffnet (Theke und Shop im Career-Modul). Die Schaufenster von Fashion
+	-- District und Player Agency baut CityLook (M4); Glasfenster und Hinweisschild hier nur noch an der Academy.
 	local SHOPS = { { "FASHION DISTRICT", Color3.fromRGB(255, 90, 170) }, { "FOOTBALL ACADEMY", Color3.fromRGB(70, 255, 150) }, { "PLAYER AGENCY", GOLD } }
 	for i, shop in ipairs(SHOPS) do
 		local x = px - 56 + (i - 1) * 56
 		local z = pz - 42 - 22
 		part({ Name = "ShopBody", Size = Vector3.new(48, 34, 26), Position = G(x, 17, z),
 			Material = Enum.Material.Concrete, Color = Color3.fromRGB(34 + i * 6, 38 + i * 6, 52 + i * 6) }, city)
-		deco({ Name = "ShopWindow", Size = Vector3.new(36, 12, 0.3), Position = G(x, 8, z + 13.1),
-			Material = Enum.Material.Glass, Color = Color3.fromRGB(150, 200, 255), Transparency = 0.35 }, city)
+		if i == 2 then
+			deco({ Name = "ShopWindow", Size = Vector3.new(36, 12, 0.3), Position = G(x, 8, z + 13.1),
+				Material = Enum.Material.Glass, Color = Color3.fromRGB(150, 200, 255), Transparency = 0.35 }, city)
+		end
 		deco({ Name = "ShopTrim", Size = Vector3.new(48.4, 0.6, 0.6), Position = G(x, 16, z + 13.2), Material = Enum.Material.Neon, Color = shop[2] }, city)
 		local sb = part({ Name = "ShopSign", Size = Vector3.new(40, 6, 0.6), Position = G(x, 21, z + 13.4),
 			Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 14, 24) }, city)
 		sign(sb, Enum.NormalId.Back, shop[1], shop[2])
-		local open = i == 1
-		local soon = part({ Name = "ShopSoon", Size = Vector3.new(16, 2.4, 0.4), Position = G(x, open and 6 or 3.4, z + 13.5),
-			Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 14, 24) }, city)
-		sign(soon, Enum.NormalId.Back, open and "JETZT GEÖFFNET" or "ERÖFFNET BALD", open and shop[2] or Color3.new(1, 1, 1))
+		if i == 2 then
+			local soon = part({ Name = "ShopSoon", Size = Vector3.new(16, 2.4, 0.4), Position = G(x, 3.4, z + 13.5),
+				Material = Enum.Material.Metal, Color = Color3.fromRGB(10, 14, 24) }, city)
+			sign(soon, Enum.NormalId.Back, "ERÖFFNET BALD", Color3.new(1, 1, 1))
+		end
 	end
 
 	city.Parent = parent

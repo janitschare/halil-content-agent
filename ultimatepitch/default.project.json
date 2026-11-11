@@ -10,7 +10,8 @@
         "Dome": { "$path": "src/Dome.lua" },
         "City": { "$path": "src/City.lua" },
         "Career": { "$path": "src/Career.lua" },
-        "CareerStore": { "$path": "src/CareerStore.lua" }
+        "CareerStore": { "$path": "src/CareerStore.lua" },
+        "CityLook": { "$path": "src/CityLook.lua" }
       }
     },
     "StarterPlayer": {
@@ -19,7 +20,8 @@
           "$path": "src/Client.client.lua",
           "AuroraFX": { "$path": "src/AuroraFX.lua" },
           "Matchday": { "$path": "src/Matchday.lua" },
-          "CareerUI": { "$path": "src/CareerUI.lua" }
+          "CareerUI": { "$path": "src/CareerUI.lua" },
+          "CityFX": { "$path": "src/CityFX.lua" }
         }
       }
     }

@@ -250,19 +250,20 @@ for _, n in ipairs({ "UP_Atmosphere", "UP_Bloom", "UP_Color" }) do
 	if o then o:Destroy() end
 end
 pcall(function()
-	-- Grundlicht der Welt (später Nachmittag). Das Nachtspiel-Licht des SPECTRA DOME ist kein globaler
-	-- Zustand mehr: jeder Client blendet es lokal ein, solange seine Kamera im Stadion ist (Client: Zonenlicht).
-	Lighting.ClockTime = 16.6
+	-- Grundlicht der Welt (M4: Sonnenuntergang wie in der Art Direction). Das Nachtspiel-Licht des SPECTRA DOME ist
+	-- kein globaler Zustand: jeder Client blendet es lokal ein, solange seine Kamera im Stadion ist (Client: Zonenlicht).
+	Lighting.ClockTime = 17.85
 	Lighting.Brightness = 2.2
-	Lighting.OutdoorAmbient = Color3.fromRGB(140, 142, 150)
-	Lighting.Ambient = Color3.fromRGB(92, 96, 110)
+	Lighting.OutdoorAmbient = Color3.fromRGB(175, 135, 150)
+	Lighting.Ambient = Color3.fromRGB(100, 82, 112)
 	Lighting.EnvironmentDiffuseScale = 0.6
 	Lighting.EnvironmentSpecularScale = 0.8
 end)
-new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.28, Offset = 0.1, Color = Color3.fromRGB(190, 205, 230),
-	Decay = Color3.fromRGB(120, 140, 170), Glare = 0.1, Haze = 1.2 }, Lighting)
-new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.4, Size = 24, Threshold = 1.2 }, Lighting)
-new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0, Contrast = 0.08, Saturation = 0.12, TintColor = Color3.new(1, 1, 1) }, Lighting)
+new("Atmosphere", { Name = "UP_Atmosphere", Density = 0.22, Offset = 0.1, Color = Color3.fromRGB(255, 150, 110),
+	Decay = Color3.fromRGB(110, 70, 160), Glare = 0.45, Haze = 1.1 }, Lighting)
+new("BloomEffect", { Name = "UP_Bloom", Intensity = 0.75, Size = 30, Threshold = 1.0 }, Lighting)
+new("ColorCorrectionEffect", { Name = "UP_Color", Brightness = 0.02, Contrast = 0.14, Saturation = 0.28,
+	TintColor = Color3.fromRGB(255, 232, 222) }, Lighting)
 
 else
 	-- Einfache Arena (z. B. Bolzplatz): Boden, Linien, Tore, unsichtbare Banden und Ball – ohne Stadion und Lobby.
@@ -1630,6 +1631,8 @@ createArena({ id = "StreetCourt", origin = LAYOUT.court.origin, halfLength = LAY
 	goalHalfWidth = 6, matchTime = 120, slots = { { d = 3, z = 0 }, { d = 12, z = -7 }, { d = 22, z = 7 } },
 	exitCFrame = CFrame.lookAt(Vector3.new(78, 5, -222), Vector3.new(86, 5, -235)) })
 local city = require(script:WaitForChild("City")).build(workspace:WaitForChild("UltimatePitch"), LAYOUT)
+-- M4 City Look: Monument, Wegweiser, Rangliste, Dome-Fassade mit Videowand (zeigt den Stadionstatus), Street-Court-Deko
+require(script:WaitForChild("CityLook")).build(city.folder, LAYOUT, RS:WaitForChild("UltimatePitch"):FindFirstChild("State"))
 Career.init(city.folder, LAYOUT)
 
 -- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Berührungen

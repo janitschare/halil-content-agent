@@ -370,6 +370,8 @@ end
 local function styleLight(l)
 	l.Shadows = profile == "Hoch"
 end
+-- City Look (M4): Deko, Partikel und Lichtkegel der Stadt je Grafikprofil, langsame Drehung des Monuments
+local CityFX = require(script:WaitForChild("CityFX"))
 local function applyProfile(name)
 	profile = name
 	for _, p in ipairs(CollectionService:GetTagged("UP_Crowd")) do styleCrowd(p) end
@@ -378,6 +380,7 @@ local function applyProfile(name)
 	if bloom then bloom.Enabled = name ~= "Niedrig" end
 	-- die Atmosphären-Dichte setzt das Zonenlicht (unten) passend zum Profil
 	AuroraFX.fxScale = name == "Niedrig" and 0.5 or 1
+	CityFX.applyProfile(name)
 	gfxLabel.Text = "GRAFIK: " .. string.upper(name) .. (touchOnly and "" or "  (G)")
 end
 -- Matchday-Atmosphäre: Anstoß-Intro und Torjubel im Stadion (rein optisch, siehe Matchday.lua)
@@ -400,9 +403,10 @@ task.delay(3, function() applyProfile(profile) end) -- Lighting-Effekte entstehe
 -- beim Verlassen wieder zurück. Andere Spieler und der Server sind davon nicht betroffen.
 local DOME_A, DOME_B, DOME_TOP = 178, 134, 58 -- Außenkante des Kessels (Halbachsen X/Z) und Dachhöhe
 local ZONE = {
-	city = { clock = 16.6, brightness = 2.2, outdoor = Color3.fromRGB(140, 142, 150), ambient = Color3.fromRGB(92, 96, 110),
-		density = 0.28, atmoColor = Color3.fromRGB(190, 205, 230), decay = Color3.fromRGB(120, 140, 170), glare = 0.1, haze = 1.2,
-		bloom = 0.4, bloomSize = 24, threshold = 1.2, ccBright = 0, contrast = 0.08, saturation = 0.12, tint = Color3.new(1, 1, 1) },
+	-- M4: Sonnenuntergang über der Stadt (Art Direction: warmes Licht, violetter Himmel, Neon leuchtet über Bloom)
+	city = { clock = 17.85, brightness = 2.2, outdoor = Color3.fromRGB(175, 135, 150), ambient = Color3.fromRGB(100, 82, 112),
+		density = 0.22, atmoColor = Color3.fromRGB(255, 150, 110), decay = Color3.fromRGB(110, 70, 160), glare = 0.45, haze = 1.1,
+		bloom = 0.75, bloomSize = 30, threshold = 1.0, ccBright = 0.02, contrast = 0.14, saturation = 0.28, tint = Color3.fromRGB(255, 232, 222) },
 	dome = { clock = 20.3, brightness = 1.5, outdoor = Color3.fromRGB(120, 140, 185), ambient = Color3.fromRGB(60, 72, 120),
 		density = 0.26, atmoColor = Color3.fromRGB(40, 70, 170), decay = Color3.fromRGB(20, 30, 90), glare = 0.4, haze = 1.4,
 		bloom = 0.9, bloomSize = 30, threshold = 1.05, ccBright = 0.05, contrast = 0.16, saturation = 0.3, tint = Color3.fromRGB(228, 236, 255) },
