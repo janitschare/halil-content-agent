@@ -1,6 +1,6 @@
 """Baut aus src/ die Place-Datei (.rbxlx) und den Command-Bar-Installer.
 
-Server-Script mit Kind-Modulen Dome, City, Career, CareerStore und CityLook, Client-LocalScript mit Kind-Modulen AuroraFX, Matchday, CareerUI und CityFX.
+Server-Script mit Kind-Modulen Dome, City, Career, CareerStore, CityLook und Props, Client-LocalScript mit Kind-Modulen AuroraFX, Matchday, CareerUI und CityFX.
 build.ps1 ist das PowerShell-Gegenstück und erzeugt dieselben Dateien.
 """
 from pathlib import Path
@@ -24,6 +24,7 @@ matchday = src("Matchday.lua")
 career = src("Career.lua")
 career_store = src("CareerStore.lua")
 city_look = src("CityLook.lua")
+props = src("Props.lua")
 city_fx = src("CityFX.lua")
 career_ui = src("CareerUI.lua")
 
@@ -40,7 +41,7 @@ rbxlx = f'''<roblox version="4">
 <Item class="Workspace" referent="RBX0"><Properties><string name="Name">Workspace</string></Properties></Item>
 <Item class="Lighting" referent="RBX8"><Properties><string name="Name">Lighting</string><token name="LightingStyle">0</token><bool name="PrioritizeLightingQuality">false</bool></Properties></Item>
 <Item class="ServerScriptService" referent="RBX1"><Properties><string name="Name">ServerScriptService</string></Properties>
-{item("Script", "RBX2", "UltimatePitchServer", server, item("ModuleScript", "RBX6", "Dome", dome) + item("ModuleScript", "RBX10", "City", city) + item("ModuleScript", "RBX11", "Career", career) + item("ModuleScript", "RBX13", "CareerStore", career_store) + item("ModuleScript", "RBX14", "CityLook", city_look))}
+{item("Script", "RBX2", "UltimatePitchServer", server, item("ModuleScript", "RBX6", "Dome", dome) + item("ModuleScript", "RBX10", "City", city) + item("ModuleScript", "RBX11", "Career", career) + item("ModuleScript", "RBX13", "CareerStore", career_store) + item("ModuleScript", "RBX14", "CityLook", city_look) + item("ModuleScript", "RBX16", "Props", props))}
 </Item>
 <Item class="StarterPlayer" referent="RBX3"><Properties><string name="Name">StarterPlayer</string></Properties>
 <Item class="StarterPlayerScripts" referent="RBX4"><Properties><string name="Name">StarterPlayerScripts</string></Properties>
@@ -85,6 +86,7 @@ local sc = Instance.new("ModuleScript") sc.Name = "City" sc.Source = [==[{city}]
 local sk = Instance.new("ModuleScript") sk.Name = "Career" sk.Source = [==[{career}]==] sk.Parent = s
 local sp = Instance.new("ModuleScript") sp.Name = "CareerStore" sp.Source = [==[{career_store}]==] sp.Parent = s
 local sl = Instance.new("ModuleScript") sl.Name = "CityLook" sl.Source = [==[{city_look}]==] sl.Parent = s
+local pr = Instance.new("ModuleScript") pr.Name = "Props" pr.Source = [==[{props}]==] pr.Parent = s
 local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[{client}]==]
 local ca = Instance.new("ModuleScript") ca.Name = "AuroraFX" ca.Source = [==[{aurora}]==] ca.Parent = c
 local cm = Instance.new("ModuleScript") cm.Name = "Matchday" cm.Source = [==[{matchday}]==] cm.Parent = c

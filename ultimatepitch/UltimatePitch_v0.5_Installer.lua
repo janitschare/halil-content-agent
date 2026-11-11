@@ -2086,10 +2086,12 @@ end
 return Dome
 ]==] sd.Parent = s
 local sc = Instance.new("ModuleScript") sc.Name = "City" sc.Source = [==[-- UltimatePitch · ULTIMATE CITY, erster Bezirk (ModuleScript unter UltimatePitchServer)
--- Prozedural aus Roblox-Grundteilen, keine externen Assets: Plaza mit Spawn, Stadionzugang zum SPECTRA DOME,
+-- Prozedural aus Roblox-Grundteilen; Palmen, Laternen und Bänke als Cube-3D-Meshes über Props.lua (ohne Vorlage
+-- ebenfalls aus Grundteilen): Plaza mit Spawn, Stadionzugang zum SPECTRA DOME,
 -- Umfeld des Bolzplatzes (Käfig, Stufen, Flutlicht) und drei Ladenfronten als Ausblick. Die Beitritts-Pads
 -- werden hier nur gebaut; die Anmeldung selbst entscheidet der Server (siehe Server-Skript).
 local City = {}
+local Props = require(script.Parent:WaitForChild("Props"))
 
 local ASPHALT = Color3.fromRGB(46, 50, 58)
 local PAVING = Color3.fromRGB(150, 154, 164)
@@ -2144,8 +2146,8 @@ local function sign(p, face, text, color, bg)
 	return l
 end
 
--- Palme (M4, Art Direction): leicht gebogener Stamm aus vier Abschnitten, sieben Wedel, Kokosnüsse, Pflanzkübel
-local function palm(pos, lean, parent)
+-- Palme aus Grundteilen (Rückfall ohne Mesh-Vorlage): leicht gebogener Stamm aus vier Abschnitten, sieben Wedel, Kokosnüsse
+local function palmParts(pos, lean, parent)
 	local up = Vector3.new(0, 1, 0)
 	local p = pos + Vector3.new(0, 1, 0)
 	for i = 1, 4 do
@@ -2167,6 +2169,18 @@ local function palm(pos, lean, parent)
 		deco({ Name = "Coconut", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.9, Position = p + Vector3.new(math.cos(a) * 0.7, -0.6, math.sin(a) * 0.7),
 			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(80, 56, 30) }, parent)
 	end
+end
+
+-- Palme (M4, Art Direction) im Pflanzkübel mit goldener Kante. Krone und Stamm als Cube-3D-Mesh (Props "Palm"),
+-- gedreht nach der Neigung; das Mesh selbst kollidiert nicht, ein unsichtbarer Zylinder hält Spieler am Stamm auf.
+local function palm(pos, lean, parent)
+	local yaw = math.atan2(-lean.X, -lean.Z)
+	if Props.place("Palm", CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, yaw, 0), parent, { Name = "PalmMesh" }) then
+		part({ Name = "PalmTrunkCollider", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
+			CFrame = CFrame.new(pos + Vector3.new(0, 5.5, 0)) * CFrame.Angles(0, 0, math.pi / 2), Transparency = 1, CastShadow = false }, parent)
+	else
+		palmParts(pos, lean, parent)
+	end
 	part({ Name = "Planter", Size = Vector3.new(5, 1, 5), Position = pos + Vector3.new(0, 0.5, 0),
 		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(28, 30, 42) }, parent)
 	-- goldene Leuchtkante am Kübelrand (nur der Rand, nicht die ganze Fläche)
@@ -2176,7 +2190,22 @@ local function palm(pos, lean, parent)
 	end
 end
 
-local function lamp(pos, parent)
+-- Laterne: Cube-3D-Mesh (Props "StreetLamp"), Ausleger zu faceTo gedreht, Licht am Lampenkopf; sonst Mast mit Leuchtkopf
+local function lamp(pos, parent, faceTo)
+	local mesh = Props.place("StreetLamp", CFrame.lookAt(pos, Vector3.new(faceTo.X, pos.Y, faceTo.Z)), parent, { Name = "StreetLamp" })
+	if mesh then
+		local head = mesh:GetAttribute("HeadOffset")
+		local a = Instance.new("Attachment")
+		a.Name = "LampLight"
+		a.Position = (typeof(head) == "Vector3" and head or Vector3.new(0, mesh.Size.Y / 2, 0)) - Vector3.new(0, 0.7, 0)
+		a.Parent = mesh
+		local glow = Instance.new("PointLight")
+		glow.Range = 28
+		glow.Brightness = 0.8
+		glow.Color = Color3.fromRGB(255, 236, 200)
+		glow.Parent = a
+		return
+	end
 	part({ Name = "LampPole", Size = Vector3.new(0.6, 14, 0.6), Position = pos + Vector3.new(0, 7, 0),
 		Material = Enum.Material.Metal, Color = STEEL }, parent)
 	local head = deco({ Name = "LampHead", Size = Vector3.new(2.4, 0.6, 2.4), Position = pos + Vector3.new(0, 14.2, 0),
@@ -2190,6 +2219,7 @@ end
 
 local function bench(pos, yaw, parent)
 	local cf = CFrame.new(pos) * CFrame.Angles(0, yaw, 0)
+	if Props.place("Bench", cf, parent, { Name = "Bench" }) then return end -- Cube-3D-Mesh, Sitzfläche nach -Z
 	part({ Name = "BenchSeat", Size = Vector3.new(7, 0.5, 2), CFrame = cf * CFrame.new(0, 1.6, 0),
 		Material = Enum.Material.WoodPlanks, Color = Color3.fromRGB(140, 100, 66) }, parent)
 	part({ Name = "BenchBack", Size = Vector3.new(7, 1.8, 0.4), CFrame = cf * CFrame.new(0, 2.7, 0.9),
@@ -2282,7 +2312,7 @@ function City.build(parent, L)
 	for _, sx in ipairs({ -1, 1 }) do
 		for i = 0, 2 do
 			palm(G(px + sx * 50, 0, pz - 30 + i * 30), Vector3.new(-sx, 0, (i - 1) * 0.6), city)
-			lamp(G(px + sx * 40, 0, pz - 36 + i * 36), city)
+			lamp(G(px + sx * 40, 0, pz - 36 + i * 36), city, G(px, 0, pz - 36 + i * 36))
 		end
 		bench(G(px + sx * 30, 0, pz - 18), sx * math.pi / 2, city)
 		bench(G(px + sx * 30, 0, pz + 18), sx * math.pi / 2, city)
@@ -3111,13 +3141,15 @@ local sl = Instance.new("ModuleScript") sl.Name = "CityLook" sl.Source = [==[-- 
 -- Baut die Abend-Optik des ersten Bezirks nach der Art Direction vom 11.11.2026 (docs/art): UP-Monument mit Brunnen,
 -- Wegweiser, Live-Rangliste, Fassade des SPECTRA DOME (LED, Banner, Videowand, Stadioneingang, Lichtkegel),
 -- Graffiti und Zuschauer am Street Court, Schaufenster von Fashion District und Player Agency, Sportwagen, Fahnen.
--- Nur Roblox-Grundteile, SurfaceGuis und eingebaute Schriften/Partikel – keine hochgeladenen Assets.
+-- Roblox-Grundteile, SurfaceGuis und eingebaute Schriften/Partikel. Sportwagen, Sneaker und Schreibtisch als Cube-3D-Meshes
+-- (Props.lua, ServerStorage.UP_Props; eigene Assets ohne Logos/Marken), ohne Vorlage wie bisher aus Grundteilen.
 -- Tags für die Clients (Grafikprofil): "UP_CityDetail" = reine Deko ohne Kollision, wird auf „Niedrig“ lokal entfernt;
 -- "UP_CityFX" = Partikel, Lichtkegel, Lichtquellen und dekorative SurfaceGuis, auf „Niedrig“ aus; "UP_Spin" = Modell, das der Client langsam dreht.
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 
 local CityLook = {}
+local Props = require(script.Parent:WaitForChild("Props"))
 
 local GOLD = Color3.fromRGB(255, 196, 64)
 local CYAN = Color3.fromRGB(40, 210, 255)
@@ -3575,7 +3607,12 @@ local function showcase(parent, x, facadeZ, gy, color)
 	return m, gy + 4.0, zc
 end
 
-local function sneaker(parent, pos, color)
+local function sneaker(parent, pos, color, yaw)
+	local mesh = Props.place("Sneaker", CFrame.new(pos) * CFrame.Angles(0, yaw or 0, 0), parent, { Name = "Sneaker" })
+	if mesh then
+		tag(mesh, "UP_CityDetail")
+		return
+	end
 	tag(deco({ Name = "SneakerSole", Size = Vector3.new(0.7, 0.25, 1.6), Position = pos + Vector3.new(0, 0.12, 0), Material = Enum.Material.SmoothPlastic, Color = WHITE }, parent), "UP_CityDetail")
 	tag(deco({ Name = "SneakerUpper", Size = Vector3.new(0.66, 0.55, 1.2), Position = pos + Vector3.new(0, 0.5, 0.15), Material = Enum.Material.SmoothPlastic, Color = color }, parent), "UP_CityDetail")
 end
@@ -3587,9 +3624,16 @@ local function subSign(parent, cf, text, color, w)
 end
 
 ---------------------------------------------------------------- Sportwagen (Deko)
-local function car(parent, cf, color, glow)
+local function car(parent, cf, color, glow, meshName)
 	local m = Instance.new("Model")
 	m.Name = "SportCar"
+	-- Cube-3D-Mesh (Vorderseite -Z wie die Bauteil-Version) mit Neon-Unterbodenlicht, das seitlich etwas hervorsteht
+	if Props.place(meshName, cf, m, { Name = "CarMesh" }) then
+		tag(deco({ Name = "CarUnderglow", Size = Vector3.new(7.6, 0.1, 11.4), CFrame = cf * CFrame.new(0, 0.12, 0), Material = Enum.Material.Neon, Color = glow }, m),
+			"UP_CityDetail")
+		m.Parent = parent
+		return m
+	end
 	part({ Name = "CarBody", Size = Vector3.new(5.6, 1.4, 12), CFrame = cf * CFrame.new(0, 1.3, 0), Material = Enum.Material.SmoothPlastic, Color = color, Reflectance = 0.25 }, m)
 	part({ ClassName = "WedgePart", Name = "CarHood", Size = Vector3.new(5.6, 0.8, 3.4), CFrame = cf * CFrame.new(0, 2.4, -4.3), Material = Enum.Material.SmoothPlastic,
 		Color = color, Reflectance = 0.25 }, m)
@@ -3712,7 +3756,7 @@ function CityLook.build(city, L, state)
 		end
 	end)
 	for k, dx in ipairs({ -15.2, -6, 5.2, 14.4 }) do
-		sneaker(look, Vector3.new(fx + dx, floorY, facadeZ + 1.6), SPRAY[k])
+		sneaker(look, Vector3.new(fx + dx, floorY, facadeZ + 1.6), SPRAY[k], k % 2 == 1 and math.pi / 2 - 0.3 or -math.pi / 2 + 0.3) -- Seitenansicht zur Straße
 	end
 	subSign(look, CFrame.lookAt(G(fx - 12, 17.15, facadeZ + 0.4), G(fx - 12, 17.15, facadeZ + 5)), "SNEAKER STORE", PINK, 14)
 	subSign(look, CFrame.lookAt(G(fx + 12, 17.15, facadeZ + 0.4), G(fx + 12, 17.15, facadeZ + 5)), "TRIKOT-SHOP", PINK, 14)
@@ -3721,8 +3765,11 @@ function CityLook.build(city, L, state)
 	-- Player Agency: Büro-Schaufenster, Agent, Taktiktafel, Sportwagen davor
 	local ax = px + 56
 	local _, aFloor = showcase(look, ax, facadeZ, gy, GOLD)
-	tag(deco({ Name = "AgencyDesk", Size = Vector3.new(8, 2.4, 1.6), Position = Vector3.new(ax - 6, aFloor + 1.2, facadeZ + 1.4), Material = Enum.Material.Wood,
-		Color = Color3.fromRGB(60, 40, 30) }, look), "UP_CityDetail")
+	local deskPos = Vector3.new(ax - 6, aFloor, facadeZ + 1.4)
+	local desk = Props.place("AgencyDesk", CFrame.lookAt(deskPos, deskPos + Vector3.new(0, 0, 1)), look, { Name = "AgencyDesk" }) -- Front zur Straße
+		or deco({ Name = "AgencyDesk", Size = Vector3.new(8, 2.4, 1.6), Position = deskPos + Vector3.new(0, 1.2, 0), Material = Enum.Material.Wood,
+			Color = Color3.fromRGB(60, 40, 30) }, look)
+	tag(desk, "UP_CityDetail")
 	local board = deco({ Name = "TacticsBoard", Size = Vector3.new(9, 5, 0.2), Position = Vector3.new(ax + 9, aFloor + 4.5, facadeZ + 0.4), Material = Enum.Material.SmoothPlastic,
 		Color = Color3.fromRGB(30, 110, 60) }, look)
 	tag(board, "UP_CityDetail")
@@ -3737,8 +3784,8 @@ function CityLook.build(city, L, state)
 	task.spawn(figure, look, CFrame.lookAt(agentPos, agentPos + Vector3.new(0, 0, 1)), { shirt = Color3.fromRGB(20, 22, 30),
 		legs = Color3.fromRGB(20, 22, 30), head = Color3.fromRGB(200, 150, 110) }, { name = "Agent" })
 	subSign(look, CFrame.lookAt(G(ax, 17.15, facadeZ + 0.4), G(ax, 17.15, facadeZ + 5)), "VERTRÄGE  ·  TRANSFERS  ·  KARRIERE  ·  BALD", GOLD, 34)
-	car(look, CFrame.new(G(px + 70, 0, pz - 43)) * CFrame.Angles(0, math.rad(80), 0), Color3.fromRGB(240, 190, 20), CYAN)
-	car(look, CFrame.new(G(px + 87, 0, pz - 45)) * CFrame.Angles(0, math.rad(100), 0), Color3.fromRGB(200, 20, 30), VIOLET)
+	car(look, CFrame.new(G(px + 70, 0, pz - 43)) * CFrame.Angles(0, math.rad(80), 0), Color3.fromRGB(240, 190, 20), CYAN, "SportCarGold")
+	car(look, CFrame.new(G(px + 87, 0, pz - 45)) * CFrame.Angles(0, math.rad(100), 0), Color3.fromRGB(200, 20, 30), VIOLET, "SportCarViolet")
 
 	look.Parent = city
 
@@ -3778,6 +3825,58 @@ end
 
 return CityLook
 ]==] sl.Parent = s
+local pr = Instance.new("ModuleScript") pr.Name = "Props" pr.Source = [==[-- UltimatePitch · Mesh-Requisiten (ModuleScript unter UltimatePitchServer)
+-- Setzt Kopien der Cube-3D-Meshes aus ServerStorage.UP_Props in die Welt (Autos, Palmen, Laternen, Bänke, Sneaker,
+-- Schreibtisch; erzeugt am 11.11.2026 in Studio, ohne Logos/Marken, Assets auf dem Konto des Entwicklers).
+-- Die Vorlagen liegen nur in der Place-Datei (Rojo verwaltet ServerStorage nicht). Fehlt eine Vorlage, etwa im
+-- Release-Installer, liefert Props.place nil und der Aufrufer baut die bisherige Version aus Grundteilen.
+--
+-- Vorlagen-Konvention (in Studio eingestellt, siehe docs/reviews/PROPS_Cube3D_2026-11-11.md):
+--   MeshPart, Vorderseite zeigt nach -Z der Vorlagen-Drehung, Größe = Zielgröße im Spiel,
+--   CollisionFidelity passend (Box/Hull, zur Laufzeit nicht änderbar), Attribut "BaseOffset" (Vector3, optional) =
+--   Punkt der Grundfläche (z. B. Stammfuß der Palme) relativ zur Teilemitte in Studs.
+local ServerStorage = game:GetService("ServerStorage")
+
+local Props = {}
+
+local function template(name)
+	local folder = ServerStorage:FindFirstChild("UP_Props")
+	local t = folder and folder:FindFirstChild(name)
+	if t and t:IsA("MeshPart") then return t end
+	return nil
+end
+
+function Props.has(name)
+	return template(name) ~= nil
+end
+
+-- name: Vorlage; base: CFrame am Boden (Position = Fußpunkt, Blickrichtung = -Z); parent: Ziel;
+-- opts (optional): Tabelle mit Eigenschaften für die Kopie (z. B. CanCollide = false, Name = "...").
+-- Rückgabe: die Kopie oder nil, wenn die Vorlage fehlt.
+function Props.place(name, base, parent, opts)
+	local t = template(name)
+	if not t then return nil end
+	local p = t:Clone()
+	local rot = t.CFrame.Rotation
+	-- Fußpunkt: BaseOffset (Teile-Koordinaten) oder Mitte der Unterseite
+	local off = t:GetAttribute("BaseOffset")
+	if typeof(off) ~= "Vector3" then
+		local s = t.Size
+		local up = rot:VectorToObjectSpace(Vector3.yAxis)
+		local halfH = math.abs(up.X) * s.X / 2 + math.abs(up.Y) * s.Y / 2 + math.abs(up.Z) * s.Z / 2
+		off = rot:VectorToObjectSpace(Vector3.new(0, -halfH, 0))
+	end
+	p.Anchored = true
+	p.CFrame = base * rot * CFrame.new(-off)
+	if opts then
+		for k, v in pairs(opts) do p[k] = v end
+	end
+	p.Parent = parent
+	return p
+end
+
+return Props
+]==] pr.Parent = s
 local c = Instance.new("LocalScript") c.Name = "UltimatePitchClient" c.Source = [==[-- UltimatePitch v0.5 · Client (HUD, Eingaben, Effekte, Sound, Grafikprofile).
 -- Sendet nur Absichten; Ladung, Ausdauer, Tore entscheidet der Server.
 local Players = game:GetService("Players")

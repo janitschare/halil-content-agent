@@ -1,8 +1,10 @@
 -- UltimatePitch · ULTIMATE CITY, erster Bezirk (ModuleScript unter UltimatePitchServer)
--- Prozedural aus Roblox-Grundteilen, keine externen Assets: Plaza mit Spawn, Stadionzugang zum SPECTRA DOME,
+-- Prozedural aus Roblox-Grundteilen; Palmen, Laternen und Bänke als Cube-3D-Meshes über Props.lua (ohne Vorlage
+-- ebenfalls aus Grundteilen): Plaza mit Spawn, Stadionzugang zum SPECTRA DOME,
 -- Umfeld des Bolzplatzes (Käfig, Stufen, Flutlicht) und drei Ladenfronten als Ausblick. Die Beitritts-Pads
 -- werden hier nur gebaut; die Anmeldung selbst entscheidet der Server (siehe Server-Skript).
 local City = {}
+local Props = require(script.Parent:WaitForChild("Props"))
 
 local ASPHALT = Color3.fromRGB(46, 50, 58)
 local PAVING = Color3.fromRGB(150, 154, 164)
@@ -57,8 +59,8 @@ local function sign(p, face, text, color, bg)
 	return l
 end
 
--- Palme (M4, Art Direction): leicht gebogener Stamm aus vier Abschnitten, sieben Wedel, Kokosnüsse, Pflanzkübel
-local function palm(pos, lean, parent)
+-- Palme aus Grundteilen (Rückfall ohne Mesh-Vorlage): leicht gebogener Stamm aus vier Abschnitten, sieben Wedel, Kokosnüsse
+local function palmParts(pos, lean, parent)
 	local up = Vector3.new(0, 1, 0)
 	local p = pos + Vector3.new(0, 1, 0)
 	for i = 1, 4 do
@@ -80,6 +82,18 @@ local function palm(pos, lean, parent)
 		deco({ Name = "Coconut", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.9, Position = p + Vector3.new(math.cos(a) * 0.7, -0.6, math.sin(a) * 0.7),
 			Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(80, 56, 30) }, parent)
 	end
+end
+
+-- Palme (M4, Art Direction) im Pflanzkübel mit goldener Kante. Krone und Stamm als Cube-3D-Mesh (Props "Palm"),
+-- gedreht nach der Neigung; das Mesh selbst kollidiert nicht, ein unsichtbarer Zylinder hält Spieler am Stamm auf.
+local function palm(pos, lean, parent)
+	local yaw = math.atan2(-lean.X, -lean.Z)
+	if Props.place("Palm", CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, yaw, 0), parent, { Name = "PalmMesh" }) then
+		part({ Name = "PalmTrunkCollider", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
+			CFrame = CFrame.new(pos + Vector3.new(0, 5.5, 0)) * CFrame.Angles(0, 0, math.pi / 2), Transparency = 1, CastShadow = false }, parent)
+	else
+		palmParts(pos, lean, parent)
+	end
 	part({ Name = "Planter", Size = Vector3.new(5, 1, 5), Position = pos + Vector3.new(0, 0.5, 0),
 		Material = Enum.Material.SmoothPlastic, Color = Color3.fromRGB(28, 30, 42) }, parent)
 	-- goldene Leuchtkante am Kübelrand (nur der Rand, nicht die ganze Fläche)
@@ -89,7 +103,22 @@ local function palm(pos, lean, parent)
 	end
 end
 
-local function lamp(pos, parent)
+-- Laterne: Cube-3D-Mesh (Props "StreetLamp"), Ausleger zu faceTo gedreht, Licht am Lampenkopf; sonst Mast mit Leuchtkopf
+local function lamp(pos, parent, faceTo)
+	local mesh = Props.place("StreetLamp", CFrame.lookAt(pos, Vector3.new(faceTo.X, pos.Y, faceTo.Z)), parent, { Name = "StreetLamp" })
+	if mesh then
+		local head = mesh:GetAttribute("HeadOffset")
+		local a = Instance.new("Attachment")
+		a.Name = "LampLight"
+		a.Position = (typeof(head) == "Vector3" and head or Vector3.new(0, mesh.Size.Y / 2, 0)) - Vector3.new(0, 0.7, 0)
+		a.Parent = mesh
+		local glow = Instance.new("PointLight")
+		glow.Range = 28
+		glow.Brightness = 0.8
+		glow.Color = Color3.fromRGB(255, 236, 200)
+		glow.Parent = a
+		return
+	end
 	part({ Name = "LampPole", Size = Vector3.new(0.6, 14, 0.6), Position = pos + Vector3.new(0, 7, 0),
 		Material = Enum.Material.Metal, Color = STEEL }, parent)
 	local head = deco({ Name = "LampHead", Size = Vector3.new(2.4, 0.6, 2.4), Position = pos + Vector3.new(0, 14.2, 0),
@@ -103,6 +132,7 @@ end
 
 local function bench(pos, yaw, parent)
 	local cf = CFrame.new(pos) * CFrame.Angles(0, yaw, 0)
+	if Props.place("Bench", cf, parent, { Name = "Bench" }) then return end -- Cube-3D-Mesh, Sitzfläche nach -Z
 	part({ Name = "BenchSeat", Size = Vector3.new(7, 0.5, 2), CFrame = cf * CFrame.new(0, 1.6, 0),
 		Material = Enum.Material.WoodPlanks, Color = Color3.fromRGB(140, 100, 66) }, parent)
 	part({ Name = "BenchBack", Size = Vector3.new(7, 1.8, 0.4), CFrame = cf * CFrame.new(0, 2.7, 0.9),
@@ -195,7 +225,7 @@ function City.build(parent, L)
 	for _, sx in ipairs({ -1, 1 }) do
 		for i = 0, 2 do
 			palm(G(px + sx * 50, 0, pz - 30 + i * 30), Vector3.new(-sx, 0, (i - 1) * 0.6), city)
-			lamp(G(px + sx * 40, 0, pz - 36 + i * 36), city)
+			lamp(G(px + sx * 40, 0, pz - 36 + i * 36), city, G(px, 0, pz - 36 + i * 36))
 		end
 		bench(G(px + sx * 30, 0, pz - 18), sx * math.pi / 2, city)
 		bench(G(px + sx * 30, 0, pz + 18), sx * math.pi / 2, city)

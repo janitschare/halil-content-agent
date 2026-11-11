@@ -11,7 +11,8 @@
         "City": { "$path": "src/City.lua" },
         "Career": { "$path": "src/Career.lua" },
         "CareerStore": { "$path": "src/CareerStore.lua" },
-        "CityLook": { "$path": "src/CityLook.lua" }
+        "CityLook": { "$path": "src/CityLook.lua" },
+        "Props": { "$path": "src/Props.lua" }
       }
     },
     "StarterPlayer": {

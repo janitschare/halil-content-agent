@@ -2,13 +2,15 @@
 -- Baut die Abend-Optik des ersten Bezirks nach der Art Direction vom 11.11.2026 (docs/art): UP-Monument mit Brunnen,
 -- Wegweiser, Live-Rangliste, Fassade des SPECTRA DOME (LED, Banner, Videowand, Stadioneingang, Lichtkegel),
 -- Graffiti und Zuschauer am Street Court, Schaufenster von Fashion District und Player Agency, Sportwagen, Fahnen.
--- Nur Roblox-Grundteile, SurfaceGuis und eingebaute Schriften/Partikel – keine hochgeladenen Assets.
+-- Roblox-Grundteile, SurfaceGuis und eingebaute Schriften/Partikel. Sportwagen, Sneaker und Schreibtisch als Cube-3D-Meshes
+-- (Props.lua, ServerStorage.UP_Props; eigene Assets ohne Logos/Marken), ohne Vorlage wie bisher aus Grundteilen.
 -- Tags für die Clients (Grafikprofil): "UP_CityDetail" = reine Deko ohne Kollision, wird auf „Niedrig“ lokal entfernt;
 -- "UP_CityFX" = Partikel, Lichtkegel, Lichtquellen und dekorative SurfaceGuis, auf „Niedrig“ aus; "UP_Spin" = Modell, das der Client langsam dreht.
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 
 local CityLook = {}
+local Props = require(script.Parent:WaitForChild("Props"))
 
 local GOLD = Color3.fromRGB(255, 196, 64)
 local CYAN = Color3.fromRGB(40, 210, 255)
@@ -466,7 +468,12 @@ local function showcase(parent, x, facadeZ, gy, color)
 	return m, gy + 4.0, zc
 end
 
-local function sneaker(parent, pos, color)
+local function sneaker(parent, pos, color, yaw)
+	local mesh = Props.place("Sneaker", CFrame.new(pos) * CFrame.Angles(0, yaw or 0, 0), parent, { Name = "Sneaker" })
+	if mesh then
+		tag(mesh, "UP_CityDetail")
+		return
+	end
 	tag(deco({ Name = "SneakerSole", Size = Vector3.new(0.7, 0.25, 1.6), Position = pos + Vector3.new(0, 0.12, 0), Material = Enum.Material.SmoothPlastic, Color = WHITE }, parent), "UP_CityDetail")
 	tag(deco({ Name = "SneakerUpper", Size = Vector3.new(0.66, 0.55, 1.2), Position = pos + Vector3.new(0, 0.5, 0.15), Material = Enum.Material.SmoothPlastic, Color = color }, parent), "UP_CityDetail")
 end
@@ -478,9 +485,16 @@ local function subSign(parent, cf, text, color, w)
 end
 
 ---------------------------------------------------------------- Sportwagen (Deko)
-local function car(parent, cf, color, glow)
+local function car(parent, cf, color, glow, meshName)
 	local m = Instance.new("Model")
 	m.Name = "SportCar"
+	-- Cube-3D-Mesh (Vorderseite -Z wie die Bauteil-Version) mit Neon-Unterbodenlicht, das seitlich etwas hervorsteht
+	if Props.place(meshName, cf, m, { Name = "CarMesh" }) then
+		tag(deco({ Name = "CarUnderglow", Size = Vector3.new(7.6, 0.1, 11.4), CFrame = cf * CFrame.new(0, 0.12, 0), Material = Enum.Material.Neon, Color = glow }, m),
+			"UP_CityDetail")
+		m.Parent = parent
+		return m
+	end
 	part({ Name = "CarBody", Size = Vector3.new(5.6, 1.4, 12), CFrame = cf * CFrame.new(0, 1.3, 0), Material = Enum.Material.SmoothPlastic, Color = color, Reflectance = 0.25 }, m)
 	part({ ClassName = "WedgePart", Name = "CarHood", Size = Vector3.new(5.6, 0.8, 3.4), CFrame = cf * CFrame.new(0, 2.4, -4.3), Material = Enum.Material.SmoothPlastic,
 		Color = color, Reflectance = 0.25 }, m)
@@ -603,7 +617,7 @@ function CityLook.build(city, L, state)
 		end
 	end)
 	for k, dx in ipairs({ -15.2, -6, 5.2, 14.4 }) do
-		sneaker(look, Vector3.new(fx + dx, floorY, facadeZ + 1.6), SPRAY[k])
+		sneaker(look, Vector3.new(fx + dx, floorY, facadeZ + 1.6), SPRAY[k], k % 2 == 1 and math.pi / 2 - 0.3 or -math.pi / 2 + 0.3) -- Seitenansicht zur Straße
 	end
 	subSign(look, CFrame.lookAt(G(fx - 12, 17.15, facadeZ + 0.4), G(fx - 12, 17.15, facadeZ + 5)), "SNEAKER STORE", PINK, 14)
 	subSign(look, CFrame.lookAt(G(fx + 12, 17.15, facadeZ + 0.4), G(fx + 12, 17.15, facadeZ + 5)), "TRIKOT-SHOP", PINK, 14)
@@ -612,8 +626,11 @@ function CityLook.build(city, L, state)
 	-- Player Agency: Büro-Schaufenster, Agent, Taktiktafel, Sportwagen davor
 	local ax = px + 56
 	local _, aFloor = showcase(look, ax, facadeZ, gy, GOLD)
-	tag(deco({ Name = "AgencyDesk", Size = Vector3.new(8, 2.4, 1.6), Position = Vector3.new(ax - 6, aFloor + 1.2, facadeZ + 1.4), Material = Enum.Material.Wood,
-		Color = Color3.fromRGB(60, 40, 30) }, look), "UP_CityDetail")
+	local deskPos = Vector3.new(ax - 6, aFloor, facadeZ + 1.4)
+	local desk = Props.place("AgencyDesk", CFrame.lookAt(deskPos, deskPos + Vector3.new(0, 0, 1)), look, { Name = "AgencyDesk" }) -- Front zur Straße
+		or deco({ Name = "AgencyDesk", Size = Vector3.new(8, 2.4, 1.6), Position = deskPos + Vector3.new(0, 1.2, 0), Material = Enum.Material.Wood,
+			Color = Color3.fromRGB(60, 40, 30) }, look)
+	tag(desk, "UP_CityDetail")
 	local board = deco({ Name = "TacticsBoard", Size = Vector3.new(9, 5, 0.2), Position = Vector3.new(ax + 9, aFloor + 4.5, facadeZ + 0.4), Material = Enum.Material.SmoothPlastic,
 		Color = Color3.fromRGB(30, 110, 60) }, look)
 	tag(board, "UP_CityDetail")
@@ -628,8 +645,8 @@ function CityLook.build(city, L, state)
 	task.spawn(figure, look, CFrame.lookAt(agentPos, agentPos + Vector3.new(0, 0, 1)), { shirt = Color3.fromRGB(20, 22, 30),
 		legs = Color3.fromRGB(20, 22, 30), head = Color3.fromRGB(200, 150, 110) }, { name = "Agent" })
 	subSign(look, CFrame.lookAt(G(ax, 17.15, facadeZ + 0.4), G(ax, 17.15, facadeZ + 5)), "VERTRÄGE  ·  TRANSFERS  ·  KARRIERE  ·  BALD", GOLD, 34)
-	car(look, CFrame.new(G(px + 70, 0, pz - 43)) * CFrame.Angles(0, math.rad(80), 0), Color3.fromRGB(240, 190, 20), CYAN)
-	car(look, CFrame.new(G(px + 87, 0, pz - 45)) * CFrame.Angles(0, math.rad(100), 0), Color3.fromRGB(200, 20, 30), VIOLET)
+	car(look, CFrame.new(G(px + 70, 0, pz - 43)) * CFrame.Angles(0, math.rad(80), 0), Color3.fromRGB(240, 190, 20), CYAN, "SportCarGold")
+	car(look, CFrame.new(G(px + 87, 0, pz - 45)) * CFrame.Angles(0, math.rad(100), 0), Color3.fromRGB(200, 20, 30), VIOLET, "SportCarViolet")
 
 	look.Parent = city
 
