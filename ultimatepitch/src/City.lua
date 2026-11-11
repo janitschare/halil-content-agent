@@ -88,7 +88,8 @@ end
 -- gedreht nach der Neigung; das Mesh selbst kollidiert nicht, ein unsichtbarer Zylinder hält Spieler am Stamm auf.
 local function palm(pos, lean, parent)
 	local yaw = math.atan2(-lean.X, -lean.Z)
-	if Props.place("Palm", CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, yaw, 0), parent, { Name = "PalmMesh" }) then
+	if Props.place("Palm", CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, yaw, 0), parent,
+		{ Name = "PalmMesh", CanCollide = false, CanQuery = false, CanTouch = false }) then
 		part({ Name = "PalmTrunkCollider", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
 			CFrame = CFrame.new(pos + Vector3.new(0, 5.5, 0)) * CFrame.Angles(0, 0, math.pi / 2), Transparency = 1, CastShadow = false }, parent)
 	else

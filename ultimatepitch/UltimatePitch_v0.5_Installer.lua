@@ -2175,7 +2175,8 @@ end
 -- gedreht nach der Neigung; das Mesh selbst kollidiert nicht, ein unsichtbarer Zylinder hält Spieler am Stamm auf.
 local function palm(pos, lean, parent)
 	local yaw = math.atan2(-lean.X, -lean.Z)
-	if Props.place("Palm", CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, yaw, 0), parent, { Name = "PalmMesh" }) then
+	if Props.place("Palm", CFrame.new(pos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, yaw, 0), parent,
+		{ Name = "PalmMesh", CanCollide = false, CanQuery = false, CanTouch = false }) then
 		part({ Name = "PalmTrunkCollider", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
 			CFrame = CFrame.new(pos + Vector3.new(0, 5.5, 0)) * CFrame.Angles(0, 0, math.pi / 2), Transparency = 1, CastShadow = false }, parent)
 	else
@@ -3608,7 +3609,8 @@ local function showcase(parent, x, facadeZ, gy, color)
 end
 
 local function sneaker(parent, pos, color, yaw)
-	local mesh = Props.place("Sneaker", CFrame.new(pos) * CFrame.Angles(0, yaw or 0, 0), parent, { Name = "Sneaker" })
+	local mesh = Props.place("Sneaker", CFrame.new(pos) * CFrame.Angles(0, yaw or 0, 0), parent,
+		{ Name = "Sneaker", CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
 	if mesh then
 		tag(mesh, "UP_CityDetail")
 		return
@@ -3766,7 +3768,8 @@ function CityLook.build(city, L, state)
 	local ax = px + 56
 	local _, aFloor = showcase(look, ax, facadeZ, gy, GOLD)
 	local deskPos = Vector3.new(ax - 6, aFloor, facadeZ + 1.4)
-	local desk = Props.place("AgencyDesk", CFrame.lookAt(deskPos, deskPos + Vector3.new(0, 0, 1)), look, { Name = "AgencyDesk" }) -- Front zur Straße
+	local desk = Props.place("AgencyDesk", CFrame.lookAt(deskPos, deskPos + Vector3.new(0, 0, 1)), look,
+		{ Name = "AgencyDesk", CanCollide = false, CanQuery = false, CanTouch = false }) -- Front zur Straße, hinter der Scheibe
 		or deco({ Name = "AgencyDesk", Size = Vector3.new(8, 2.4, 1.6), Position = deskPos + Vector3.new(0, 1.2, 0), Material = Enum.Material.Wood,
 			Color = Color3.fromRGB(60, 40, 30) }, look)
 	tag(desk, "UP_CityDetail")
