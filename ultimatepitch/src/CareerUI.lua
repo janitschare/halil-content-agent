@@ -35,7 +35,10 @@ local function button(parent, text, color, props)
 	return b
 end
 
-function CareerUI.start(gui, remote)
+-- opts.reducedMotion(): true = keine Daueranimationen (Barrierefreiheit, siehe AuroraFX)
+function CareerUI.start(gui, remote, opts)
+	opts = opts or {}
+	local reducedMotion = opts.reducedMotion or function() return false end
 	local player = Players.LocalPlayer
 
 	------------------------------------------------------------ Coins und Stufe (linker Rand, mittig: oben links liegen Roblox-Chat und Anzeigetafel)
@@ -291,9 +294,11 @@ function CareerUI.start(gui, remote)
 		end
 		player:GetAttributeChangedSignal("CareerStageIndex"):Connect(refreshMarker)
 		refreshMarker()
-		-- sanftes Wippen, solange die Markierung sichtbar ist
+		-- sanftes Wippen, solange die Markierung sichtbar ist (bei reduzierter Bewegung fest)
 		while bb.Parent do
-			if bb.Enabled then bb.StudsOffset = Vector3.new(0, 3.2 + math.sin(os.clock() * 3) * 0.25, 0) end
+			if bb.Enabled then
+				bb.StudsOffset = Vector3.new(0, 3.2 + (reducedMotion() and 0 or math.sin(os.clock() * 3) * 0.25), 0)
+			end
 			task.wait(1 / 20)
 		end
 	end)

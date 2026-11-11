@@ -1632,7 +1632,11 @@ createArena({ id = "StreetCourt", origin = LAYOUT.court.origin, halfLength = LAY
 	exitCFrame = CFrame.lookAt(Vector3.new(78, 5, -222), Vector3.new(86, 5, -235)) })
 local city = require(script:WaitForChild("City")).build(workspace:WaitForChild("UltimatePitch"), LAYOUT)
 -- M4 City Look: Monument, Wegweiser, Rangliste, Dome-Fassade mit Videowand (zeigt den Stadionstatus), Street-Court-Deko
-require(script:WaitForChild("CityLook")).build(city.folder, LAYOUT, RS:WaitForChild("UltimatePitch"):FindFirstChild("State"))
+-- reine Optik: ein Fehler darin darf Karriere und Pads nicht blockieren
+local lookOk, lookErr = pcall(function()
+	require(script:WaitForChild("CityLook")).build(city.folder, LAYOUT, RS:WaitForChild("UltimatePitch"):FindFirstChild("State"))
+end)
+if not lookOk then warn("[CityLook] Aufbau fehlgeschlagen: " .. tostring(lookErr)) end
 Career.init(city.folder, LAYOUT)
 
 -- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Berührungen

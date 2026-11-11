@@ -3,7 +3,8 @@
 --   "UP_CityDetail" (Deko ohne Kollision): auf „Niedrig“ lokal aus der Welt genommen (spart Rendering wirklich,
 --                   Ausblenden allein brachte laut Messung vom 07.11. nichts), sonst wieder eingehängt.
 --   "UP_CityFX" (Partikel, Lichtkegel, Lichtquellen, dekorative SurfaceGuis): auf „Niedrig“ aus.
---   "UP_Spin" (Monument-Ball, Ring): dreht sich langsam um die senkrechte Achse, nur in Kameranähe und nicht auf „Niedrig“.
+--   "UP_Spin" (Monument-Ball, Ring): dreht sich langsam um die senkrechte Achse, nur in Kameranähe, nicht auf „Niedrig“
+--                   und nicht bei reduzierter Bewegung.
 -- Andere Spieler und der Server sind davon nicht betroffen.
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
@@ -14,6 +15,12 @@ local profile = "Hoch"
 local stash = {} -- [Instance] = ursprünglicher Parent (auf „Niedrig“ lokal entfernte Deko)
 local spins = {} -- [Model] = { pivot = CFrame, angle = number }
 local SPIN_RANGE = 260
+local reducedMotion = function() return false end -- vom Client gesetzt (AuroraFX.reducedMotion)
+
+-- Reduzierte Bewegung (Barrierefreiheit): hält die Drehung an, solange die Einstellung aktiv ist
+function CityFX.setReducedMotion(getter)
+	reducedMotion = getter
+end
 
 local function styleDetail(inst)
 	if profile == "Niedrig" then
@@ -63,7 +70,7 @@ for _, m in ipairs(CollectionService:GetTagged("UP_Spin")) do addSpin(m) end
 
 local acc = 0
 RunService.Heartbeat:Connect(function(dt)
-	if profile == "Niedrig" then return end
+	if profile == "Niedrig" or reducedMotion() then return end
 	acc += dt
 	if acc < 1 / 30 then return end -- 30 Schritte pro Sekunde genügen für die langsame Drehung
 	local step = acc

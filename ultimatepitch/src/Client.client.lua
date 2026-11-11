@@ -372,6 +372,7 @@ local function styleLight(l)
 end
 -- City Look (M4): Deko, Partikel und Lichtkegel der Stadt je Grafikprofil, langsame Drehung des Monuments
 local CityFX = require(script:WaitForChild("CityFX"))
+CityFX.setReducedMotion(function() return AuroraFX.reducedMotion end)
 local function applyProfile(name)
 	profile = name
 	for _, p in ipairs(CollectionService:GetTagged("UP_Crowd")) do styleCrowd(p) end
@@ -393,7 +394,8 @@ Matchday.start(State, gui, {
 })
 CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if profile then styleCrowd(p) end end)
 -- Karriere (M3): Pitch Coins, Stufe, Meldungen, Scout-Gespräch und Shop (nur Anzeige, Werte vom Server)
-require(script:WaitForChild("CareerUI")).start(gui, RS:WaitForChild("UltimatePitch"):WaitForChild("Career"))
+require(script:WaitForChild("CareerUI")).start(gui, RS:WaitForChild("UltimatePitch"):WaitForChild("Career"),
+	{ reducedMotion = function() return AuroraFX.reducedMotion end })
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())
 task.delay(3, function() applyProfile(profile) end) -- Lighting-Effekte entstehen serverseitig evtl. später

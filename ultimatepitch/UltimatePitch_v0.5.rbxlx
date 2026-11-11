@@ -1636,7 +1636,11 @@ createArena({ id = "StreetCourt", origin = LAYOUT.court.origin, halfLength = LAY
 	exitCFrame = CFrame.lookAt(Vector3.new(78, 5, -222), Vector3.new(86, 5, -235)) })
 local city = require(script:WaitForChild("City")).build(workspace:WaitForChild("UltimatePitch"), LAYOUT)
 -- M4 City Look: Monument, Wegweiser, Rangliste, Dome-Fassade mit Videowand (zeigt den Stadionstatus), Street-Court-Deko
-require(script:WaitForChild("CityLook")).build(city.folder, LAYOUT, RS:WaitForChild("UltimatePitch"):FindFirstChild("State"))
+-- reine Optik: ein Fehler darin darf Karriere und Pads nicht blockieren
+local lookOk, lookErr = pcall(function()
+	require(script:WaitForChild("CityLook")).build(city.folder, LAYOUT, RS:WaitForChild("UltimatePitch"):FindFirstChild("State"))
+end)
+if not lookOk then warn("[CityLook] Aufbau fehlgeschlagen: " .. tostring(lookErr)) end
 Career.init(city.folder, LAYOUT)
 
 -- Beitritt: Wer nirgends angemeldet ist und ein Pad betritt, wird für dessen Arena angemeldet. Berührungen
@@ -4121,6 +4125,7 @@ local function styleLight(l)
 end
 -- City Look (M4): Deko, Partikel und Lichtkegel der Stadt je Grafikprofil, langsame Drehung des Monuments
 local CityFX = require(script:WaitForChild("CityFX"))
+CityFX.setReducedMotion(function() return AuroraFX.reducedMotion end)
 local function applyProfile(name)
 	profile = name
 	for _, p in ipairs(CollectionService:GetTagged("UP_Crowd")) do styleCrowd(p) end
@@ -4142,7 +4147,8 @@ Matchday.start(State, gui, {
 })
 CollectionService:GetInstanceAddedSignal("UP_Crowd"):Connect(function(p) if profile then styleCrowd(p) end end)
 -- Karriere (M3): Pitch Coins, Stufe, Meldungen, Scout-Gespräch und Shop (nur Anzeige, Werte vom Server)
-require(script:WaitForChild("CareerUI")).start(gui, RS:WaitForChild("UltimatePitch"):WaitForChild("Career"))
+require(script:WaitForChild("CareerUI")).start(gui, RS:WaitForChild("UltimatePitch"):WaitForChild("Career"),
+	{ reducedMotion = function() return AuroraFX.reducedMotion end })
 CollectionService:GetInstanceAddedSignal("UP_FieldLight"):Connect(function(l) if profile then styleLight(l) end end)
 applyProfile(autoProfile())
 task.delay(3, function() applyProfile(profile) end) -- Lighting-Effekte entstehen serverseitig evtl. später
@@ -5318,7 +5324,10 @@ local function button(parent, text, color, props)
 	return b
 end
 
-function CareerUI.start(gui, remote)
+-- opts.reducedMotion(): true = keine Daueranimationen (Barrierefreiheit, siehe AuroraFX)
+function CareerUI.start(gui, remote, opts)
+	opts = opts or {}
+	local reducedMotion = opts.reducedMotion or function() return false end
 	local player = Players.LocalPlayer
 
 	------------------------------------------------------------ Coins und Stufe (linker Rand, mittig: oben links liegen Roblox-Chat und Anzeigetafel)
@@ -5574,9 +5583,11 @@ function CareerUI.start(gui, remote)
 		end
 		player:GetAttributeChangedSignal("CareerStageIndex"):Connect(refreshMarker)
 		refreshMarker()
-		-- sanftes Wippen, solange die Markierung sichtbar ist
+		-- sanftes Wippen, solange die Markierung sichtbar ist (bei reduzierter Bewegung fest)
 		while bb.Parent do
-			if bb.Enabled then bb.StudsOffset = Vector3.new(0, 3.2 + math.sin(os.clock() * 3) * 0.25, 0) end
+			if bb.Enabled then
+				bb.StudsOffset = Vector3.new(0, 3.2 + (reducedMotion() and 0 or math.sin(os.clock() * 3) * 0.25), 0)
+			end
 			task.wait(1 / 20)
 		end
 	end)
@@ -5606,7 +5617,8 @@ return CareerUI
 --   "UP_CityDetail" (Deko ohne Kollision): auf „Niedrig“ lokal aus der Welt genommen (spart Rendering wirklich,
 --                   Ausblenden allein brachte laut Messung vom 07.11. nichts), sonst wieder eingehängt.
 --   "UP_CityFX" (Partikel, Lichtkegel, Lichtquellen, dekorative SurfaceGuis): auf „Niedrig“ aus.
---   "UP_Spin" (Monument-Ball, Ring): dreht sich langsam um die senkrechte Achse, nur in Kameranähe und nicht auf „Niedrig“.
+--   "UP_Spin" (Monument-Ball, Ring): dreht sich langsam um die senkrechte Achse, nur in Kameranähe, nicht auf „Niedrig“
+--                   und nicht bei reduzierter Bewegung.
 -- Andere Spieler und der Server sind davon nicht betroffen.
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
@@ -5617,6 +5629,12 @@ local profile = "Hoch"
 local stash = {} -- [Instance] = ursprünglicher Parent (auf „Niedrig“ lokal entfernte Deko)
 local spins = {} -- [Model] = { pivot = CFrame, angle = number }
 local SPIN_RANGE = 260
+local reducedMotion = function() return false end -- vom Client gesetzt (AuroraFX.reducedMotion)
+
+-- Reduzierte Bewegung (Barrierefreiheit): hält die Drehung an, solange die Einstellung aktiv ist
+function CityFX.setReducedMotion(getter)
+	reducedMotion = getter
+end
 
 local function styleDetail(inst)
 	if profile == "Niedrig" then
@@ -5666,7 +5684,7 @@ for _, m in ipairs(CollectionService:GetTagged("UP_Spin")) do addSpin(m) end
 
 local acc = 0
 RunService.Heartbeat:Connect(function(dt)
-	if profile == "Niedrig" then return end
+	if profile == "Niedrig" or reducedMotion() then return end
 	acc += dt
 	if acc < 1 / 30 then return end -- 30 Schritte pro Sekunde genügen für die langsame Drehung
 	local step = acc
